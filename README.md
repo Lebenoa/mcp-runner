@@ -6,6 +6,9 @@ Connect MCP servers to your browser sidebar and use their tools in supported AI 
 
 ![Language: TypeScript](https://img.shields.io/badge/lang-TypeScript-3178C6)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+![Build](https://img.shields.io/github/actions/workflow/status/Lebenoa/mcp-runner/release.yml?branch=master)
+![Issues](https://img.shields.io/github/issues/Lebenoa/mcp-runner)
+![Stars](https://img.shields.io/github/stars/Lebenoa/mcp-runner)
 
 ![MCP Runner sidebar with server profiles and tools](docs/sidebar.png)
 
@@ -20,7 +23,9 @@ Connect MCP servers to your browser sidebar and use their tools in supported AI 
 
 ## Installation
 
-Build from source with [Deno](https://deno.com/) 2.9 or later. Run these commands from the project directory:
+Download a prebuilt extension zip from the [Releases](https://github.com/Lebenoa/mcp-runner/releases) page — `mcp-runner-chrome-*.zip` for Chromium browsers, `mcp-runner-firefox-*.zip` for Firefox — unzip it, and load the unpacked folder per the table below.
+
+To build from source instead, install [Deno](https://deno.com/) 2.9 or later. Run these commands from the project directory:
 
 ```sh
 deno install
