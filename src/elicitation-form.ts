@@ -27,7 +27,8 @@ export function createElicitationForm(doc: Document, schema: Record<string, unkn
     try {
       if(action==='accept')for(const [key,input] of fields){
         if(!input.value)continue;
-        const spec=properties[key];
+        const raw=properties[key];
+        const spec=(raw&&typeof raw==='object'?raw:{}) as Record<string, unknown>;
         if(spec.type==='boolean')content[key]=input.value==='true';
         else if(spec.type==='number'||spec.type==='integer'){const value=Number(input.value);if(!Number.isFinite(value))throw new Error(`${key} must be a number.`);content[key]=value;}
         else if(spec.type==='object'||spec.type==='array'){try{content[key]=JSON.parse(input.value);}catch{throw new Error(`${key} must contain valid JSON.`);}}

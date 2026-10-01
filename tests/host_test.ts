@@ -29,7 +29,7 @@ Deno.test('Ask and Auto-safe require approval for unreviewed tools',async()=>{
   for(const preset of ['auto-safe','ask'] as const){
    await host.handle({type:'preset',preset});
    const operation=host.handle({type:'invoke',command:{id:preset,server:'fixture',tool:'echo',arguments:{value:preset}}});
-   await new Promise(resolve=>setTimeout(resolve,10));
+   for(let i=0;i<100 && !host.state.prompts.length;i++){const {promise,resolve}=Promise.withResolvers<void>();setTimeout(resolve,5);await promise;}
    assert(host.state.prompts[0]?.kind==='execution','unclassified call skipped review');
    await host.handle({type:'reply',id:host.state.prompts[0].id,action:'accept'});
    await operation;
@@ -51,7 +51,8 @@ Deno.test('startup reconnect restores intended sessions and isolates missing per
   assert(restored.state.connections.denied.status==='error'&&restored.state.connections.offline.status==='error','startup failures were not isolated');
   const before=JSON.stringify(restored.state);
   const status=await restored.handle({type:'server-status',id:'query',chat:'https://chat.deepseek.com/a/chat/s/status'}) as {servers:{name:string;status:string;tools:string[]}[]};
-  assert(status.servers.length===4&&status.servers[0].tools[0]==='echo'&&status.servers[1].status==='disconnected','status omitted saved servers');
+  const activeServer=status.servers.find(server=>server.name==='active');
+  assert(status.servers.length===4&&activeServer?.tools[0]==='echo'&&status.servers.find(server=>server.name==='off')?.status==='disconnected','status omitted saved servers');
   assert(!JSON.stringify(status).includes('127.0.0.1')&&JSON.stringify(restored.state)===before,'status leaked endpoint or changed sessions');
   const chat='https://chat.deepseek.com/a/chat/s/status';
   await restored.handle({type:'server-status',id:'disconnect',chat,action:'disconnect',server:'active'});

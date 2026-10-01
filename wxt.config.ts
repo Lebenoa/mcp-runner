@@ -1,9 +1,10 @@
 import { defineConfig } from 'wxt';
+import { CHAT_SITES } from './src/contracts.ts';
 export default defineConfig({
   hooks: {
     'build:manifestGenerated': (_wxt, manifest) => {
-      const chatOrigins = ['https://chat.deepseek.com/*', 'https://chatgpt.com/*'];
-      manifest.host_permissions = manifest.host_permissions?.filter(host => !chatOrigins.includes(host));
+      const chatMatches = CHAT_SITES.map(site => site.match);
+      manifest.host_permissions = manifest.host_permissions?.filter(host => !chatMatches.includes(host));
       if (manifest.manifest_version === 2) {
         manifest.optional_permissions = [...(manifest.optional_permissions ?? []), 'http://*/*', 'https://*/*'];
       }

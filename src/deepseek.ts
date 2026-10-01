@@ -1,7 +1,5 @@
 import { startChatEngine, type ChatDom, type Request } from './chat-engine.ts';
 
-export type { Request };
-
 const SEND_ARROW = 'div[role="button"].ds-button--circle.ds-button--primary';
 const COMPOSER = 'textarea[placeholder="Message DeepSeek"]';
 
@@ -31,12 +29,12 @@ const deepSeekDom = (doc: Document, win: Window): ChatDom => {
       const keyboard = event as KeyboardEvent;
       return event.type === 'click'
         ? !!target && arrow.contains(target)
-        : target === composerElement && keyboard.key === 'Enter' && !keyboard.shiftKey && !keyboard.isComposing && !keyboard.ctrlKey && !keyboard.altKey && !keyboard.metaKey;
+        : !!target && (target === composerElement || composerElement.contains(target)) && keyboard.key === 'Enter' && !keyboard.shiftKey && !keyboard.isComposing && !keyboard.ctrlKey && !keyboard.altKey && !keyboard.metaKey;
     },
     userBlocks: () => [...doc.querySelectorAll<HTMLElement>('.ds-message:not(:has(.ds-assistant-message-main-content))')]
       .flatMap(message => message.firstElementChild instanceof HTMLElement ? [message.firstElementChild] : []),
     messageOf: container => container.closest('.ds-assistant-message-main-content'),
-    assistantBlocks: () => [...doc.querySelectorAll<HTMLElement>('.md-code-block pre')].map(pre => {
+    assistantBlocks: () => [...doc.querySelectorAll<HTMLElement>('.ds-assistant-message-main-content .md-code-block pre')].map(pre => {
       const block = pre.closest<HTMLElement>('.md-code-block');
       const language = block?.querySelector('.md-code-block-banner span')?.textContent?.trim().toLowerCase() ?? '';
       return { container: block ?? pre, code: pre.textContent ?? '', language };

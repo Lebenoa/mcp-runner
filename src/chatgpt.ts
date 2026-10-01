@@ -1,11 +1,10 @@
 import { startChatEngine, type ChatDom, type Request } from './chat-engine.ts';
 
-export type { Request };
-
 // chatgpt.com re-renders its composer and controls frequently; every selector
 // has fallbacks and each may need updating when the site ships new markup.
 const COMPOSER = '#prompt-textarea, textarea[data-testid="prompt-textarea"], textarea#prompt-textarea';
 const SEND = 'button[data-testid="send-button"], button#composer-submit-button, button[aria-label="Send prompt"], button[aria-label*="Send"]';
+const flattenEditor = (value: string): string => value.replace(/\s+/g, ' ').trim();
 
 const chatGptDom = (doc: Document, win: Window): ChatDom => {
   const composer = () => doc.querySelector<HTMLElement>(COMPOSER);
@@ -27,23 +26,26 @@ const chatGptDom = (doc: Document, win: Window): ChatDom => {
         return;
       }
       // ProseMirror contenteditable: replace the content through insertText so
-      // the editor's input pipeline (and the send button state) updates.
+      // the editor's input pipeline (and the send button state) updates. If
+      // the command is unavailable or a no-op, fall back to raw replacement.
       composerElement.focus();
       const selection = view.getSelection();
+      let inserted = false;
       if (selection && view.document.execCommand) {
         const range = view.document.createRange();
         range.selectNodeContents(composerElement);
         selection.removeAllRanges();
         selection.addRange(range);
-        view.document.execCommand('insertText', false, text);
-      } else {
+        inserted = view.document.execCommand('insertText', false, text);
+      }
+      if (!inserted || flattenEditor(composerElement.textContent ?? '') !== flattenEditor(text)) {
         composerElement.textContent = text;
         composerElement.dispatchEvent(new view.Event('input', { bubbles: true }));
       }
     },
     sendButton,
     sendDisabled: button => button.hasAttribute('disabled') || button.getAttribute('aria-disabled') === 'true' || button.classList.contains('disabled'),
-    isGenerating: () => Boolean(doc.querySelector('[data-testid="stop-button"], button[aria-label*="Stop"], div[aria-label*="Stop generating"]')),
+    isGenerating: () => Boolean(doc.querySelector('[data-testid="stop-button"], [aria-label="Stop streaming"], [aria-label="Stop generating"]')),
     hasMessages: () => Boolean(doc.querySelector('[data-message-author-role], [data-testid^="conversation-turn"]')),
     isExistingChatRoute: () => /^\/(c|g|gpts)\/[^/]/.test(win.location.pathname),
     isSubmitIntent: event => {
@@ -62,7 +64,6 @@ const chatGptDom = (doc: Document, win: Window): ChatDom => {
       const code = pre.querySelector('code');
       const language = code?.className.match(/language-([\w-]+)/)?.[1]?.toLowerCase()
         ?? code?.getAttribute('data-language')?.toLowerCase()
-        ?? pre.closest('[data-message-author-role="assistant"]')?.querySelector<HTMLElement>('[class*="language"], [data-language]')?.textContent?.trim().toLowerCase()
         ?? '';
       return { container: pre, code: pre.textContent ?? '', language };
     }),

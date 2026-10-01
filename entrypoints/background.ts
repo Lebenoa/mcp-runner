@@ -1,18 +1,24 @@
 import { browser } from 'wxt/browser';
 import { installHost } from '../src/runtime-host.ts';
-import { originFor } from '../src/contracts.ts';
-import type { Reply, Snapshot } from '../src/contracts.ts';
+import { CHAT_SITES, originFor, redact } from '../src/contracts.ts';
+import type { Reply } from '../src/contracts.ts';
 import { actionSchema } from '../src/validation.ts';
-import { createSystemPrompt } from '../src/system-prompt.ts';
 export default defineBackground(() => {
   let ready: Promise<void> | undefined;
+  let creating = false;
   async function ensureHost() {
     if (import.meta.env.BROWSER === 'firefox') {
       ready ??= installHost().then(() => {}).catch(error => { ready = undefined; throw error; });
       await ready; return;
     }
-    if (ready && !(await browser.offscreen.hasDocument())) ready = undefined;
-    if (ready) return await ready;
+    if (ready) {
+      // While creation is in flight the document may not exist yet; resetting
+      // ready here would race a duplicate createDocument, so wait it out.
+      if (creating) return await ready;
+      if (!(await browser.offscreen.hasDocument())) ready = undefined;
+      if (ready) return await ready;
+    }
+    creating = true;
     ready = (async () => {
       const offscreen = browser.offscreen;
       if (!(await offscreen.hasDocument())) await offscreen.createDocument({ url: 'offscreen.html', reasons: ['WORKERS'], justification: 'Maintain MCP network sessions while the sidebar is closed' });
@@ -22,19 +28,22 @@ export default defineBackground(() => {
         await new Promise(resolve => setTimeout(resolve, 50));
       }
       throw new Error('MCP session host failed to start');
-    })().catch(error => { ready = undefined; throw error; });
+    })().finally(() => { creating = false; }).catch(error => { ready = undefined; throw error; });
     await ready;
   }
-  async function registerChats() {
-    for (const site of [
-      { id: 'deepseek', matches: ['https://chat.deepseek.com/*'], js: 'content-scripts/deepseek.js' },
-      { id: 'chatgpt', matches: ['https://chatgpt.com/*'], js: 'content-scripts/chatgpt.js' },
-    ]) {
-      const granted = await browser.permissions.contains({ origins: site.matches });
-      const registered = await browser.scripting.getRegisteredContentScripts({ ids: [site.id] });
-      if (granted && !registered.length) await browser.scripting.registerContentScripts([{ id: site.id, matches: site.matches, js: [site.js], runAt: 'document_idle' }]);
-      if (!granted && registered.length) await browser.scripting.unregisterContentScripts({ ids: [site.id] });
-    }
+  let registering: Promise<void> | undefined;
+  function registerChats() {
+    registering ??= (async () => {
+      for (const site of CHAT_SITES) {
+        try {
+          const granted = await browser.permissions.contains({ origins: [site.match] });
+          const registered = await browser.scripting.getRegisteredContentScripts({ ids: [site.id] });
+          if (granted && !registered.length) await browser.scripting.registerContentScripts([{ id: site.id, matches: [site.match], js: [site.script], runAt: 'document_idle' }]);
+          if (!granted && registered.length) await browser.scripting.unregisterContentScripts({ ids: [site.id] });
+        } catch (error) { console.error(`MCP content script registration failed for ${site.id}`, error); }
+      }
+    })().finally(() => { registering = undefined; });
+    return registering;
   }
   browser.permissions.onAdded.addListener(() => { void registerChats(); });
   browser.permissions.onRemoved.addListener(() => { void registerChats(); });
@@ -53,30 +62,24 @@ export default defineBackground(() => {
     }
     if (message?.target !== 'router' || sender.id !== browser.runtime.id) return;
     return (async (): Promise<Reply> => {
+      let page = false;
       try {
         const action = actionSchema.parse(message.action);
         const sidebar = sender.url === browser.runtime.getURL('sidepanel.html');
-        const page = !!sender.tab && !sidebar;
+        page = !!sender.tab && !sidebar;
         if (page) {
           const currentTab = await browser.tabs.get(sender.tab!.id!);
           const url = new URL(currentTab.url ?? sender.url ?? '');
-          if (!['https://chat.deepseek.com', 'https://chatgpt.com'].includes(url.origin) || sender.frameId !== 0) throw new Error('Unauthorized page');
-          if (!['invoke','snapshot','server-status','approval-status','approve-command','reply-elicitation'].includes(action.type)) throw new Error('Page cannot manage extension');
+          if (!CHAT_SITES.some(site => site.origin === url.origin) || sender.frameId !== 0) throw new Error('Unauthorized page');
+          if (action.type !== 'invoke' && action.type !== 'page-snapshot' && action.type !== 'server-status' && action.type !== 'approval-status' && action.type !== 'approve-command' && action.type !== 'reply-elicitation') throw new Error('Page cannot manage extension');
           if ((action.type === 'invoke' || action.type === 'server-status' || action.type === 'approval-status' || action.type === 'approve-command' || action.type === 'reply-elicitation') && action.chat !== url.href) throw new Error('Command chat does not match sender');
         } else if (!sidebar) throw new Error('Unauthorized extension page');
-        if (action.type === 'connect') {
-          const stored = await browser.storage.local.get('state');
-          const profile = stored.state?.profiles?.find((p: {name:string}) => p.name === action.name);
-          if (!profile) throw new Error('Unknown profile');
-          if (!(await browser.permissions.contains({ origins:[originFor(profile.url)] }))) throw new Error('Grant endpoint permission from the sidebar');
-        }
         await ensureHost();
-        const reply = await browser.runtime.sendMessage({ target:'host', action }) as Reply;
-        if (page && action.type === 'snapshot' && reply.ok) {
-          const state = reply.value as Snapshot;
-          reply.value = { systemPrompt: createSystemPrompt(state), pacing: state.pacing };
-        }
-        return reply;      } catch(error) { return { ok:false, error:String(error) }; }
+        return await browser.runtime.sendMessage({ target:'host', action }) as Reply;
+      } catch(error) {
+        const text = String(error);
+        return { ok:false, error: page ? redact(text) : text };
+      }
     })();
   });
   void ensureHost().catch(error => console.error('MCP startup reconnect failed', error));

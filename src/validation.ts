@@ -2,6 +2,7 @@ import { z } from 'zod';
 const command = z.object({id:z.string().min(1),server:z.string().min(1),tool:z.string().min(1),arguments:z.record(z.unknown())}).strict();
 export const actionSchema = z.discriminatedUnion('type',[
  z.object({type:z.literal('snapshot')}),
+ z.object({type:z.literal('page-snapshot')}),
  z.object({type:z.literal('server-status'),id:z.string().trim().min(1),chat:z.string().url(),action:z.enum(['connect','disconnect']).optional(),server:z.string().min(1).optional()}),
  z.object({type:z.literal('save'),originalName:z.string().optional(),profile:z.object({name:z.string().trim().min(1),url:z.string().url(),transport:z.enum(['http','sse','ws'])})}),
  z.object({type:z.literal('remove'),name:z.string()}),

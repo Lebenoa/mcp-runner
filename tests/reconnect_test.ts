@@ -11,7 +11,7 @@ Deno.test('unexpected connection loss retries after 5 seconds and reconnects on 
   try {
     await host.handle({type:'save',profile:{name:'w',url:fixture.url.replace('http:','ws:')+'/ws',transport:'ws'}});
     await host.handle({type:'connect',name:'w'});
-    assert(host.state.profiles[0].reconnect === true,'connected profile lost reconnection intent');
+    assert(host.state.profiles.find(profile=>profile.name==='w')?.reconnect === true,'connected profile lost reconnection intent');
     fixture.closeSockets();
     await until(() => host.state.connections.w.status === 'disconnected');
     // The server never came back down; the host must reconnect on its own.

@@ -1,7 +1,7 @@
 import { createBlockCard } from './block-card.ts';
 import { createPayloadSection } from './payload-view.ts';
 import { createElicitationForm } from './elicitation-form.ts';
-import type { Action, Command } from './contracts.ts';
+import { decodeCommand, type Action, type Command } from './contracts.ts';
 
 export type Request = (action: Action) => Promise<unknown>;
 
@@ -40,21 +40,20 @@ type Pending = { chat: string; command: Command; card: HTMLElement; statusQuery?
 
 const flatten = (value: string): string => value.replace(/\s+/g, ' ').trim();
 const FENCE = /```(mcp-status-result|mcp-status|mcp-result|mcp)\s*\n([\s\S]*?)\n```/g;
-
-const decodeCommand = (text: string): Command | null => {
-  try {
-    const value: unknown = JSON.parse(text);
-    if (!value || Array.isArray(value) || typeof value !== 'object') return null;
-    if (!('id' in value) || !('server' in value) || !('tool' in value) || !('arguments' in value)) return null;
-    const { id, server, tool, arguments: args } = value;
-    if (typeof id !== 'string' || !id.trim() || typeof server !== 'string' || !server.trim() ||
-        typeof tool !== 'string' || !tool.trim() || !args || Array.isArray(args) || typeof args !== 'object') return null;
-    return { id, server, tool, arguments: args as Record<string, unknown> };
-  } catch { return null; }
+// Marks payloads produced by our own catch handlers so a legitimate tool
+// result that happens to contain an `error` key is not mistaken for a failure.
+const FAILURE = Symbol('mcp-runner-failure');
+const failure = (message: string) => {
+  const payload: { error: string } & { [FAILURE]?: boolean } = { error: message };
+  payload[FAILURE] = true;
+  return payload;
 };
+const isFailure = (payload: unknown): payload is { error: string } =>
+  typeof payload === 'object' && payload !== null && (payload as { [FAILURE]?: boolean })[FAILURE] === true;
 
 export function startChatEngine(request: Request, doc: Document, win: Window, dom: ChatDom): () => void {
   const seen = new Map<string, string>();
+  const shared = new Set<string>();
   const resultObservers = new Set<MutationObserver>();
   const approvalTimers = new Set<number>();
   let generation = 0;
@@ -64,7 +63,7 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
   let firstMessageSent = false;
   let promptRoute = win.location.href;
   const interceptFirstMessage = (event: Event) => {
-    if (replayingSubmission) return;
+    if (!event.isTrusted || replayingSubmission) return;
     const input = dom.composer();
     const arrow = dom.sendButton();
     if (!input || !arrow || !dom.isSubmitIntent(event)) return;
@@ -78,13 +77,20 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
     preparingPrompt = true;
     const draft = dom.composerValue(input);
     const route = win.location.href;
-    void request({ type: 'snapshot' }).then(value => {
+    void request({ type: 'page-snapshot' }).then(value => {
       if (stopped || win.location.href !== route || !input.isConnected || flatten(dom.composerValue(input)) !== flatten(draft) || dom.hasMessages()) return;
       if (!value || typeof value !== 'object' || !('systemPrompt' in value) || typeof value.systemPrompt !== 'string') throw new Error('Tool instructions unavailable');
       dom.setComposerValue(input, `${value.systemPrompt}\n\nUser request:\n${draft}`);
+      const button = dom.sendButton();
+      if (!button) {
+        // The site re-rendered mid-flight: restore the draft and fail loudly
+        // instead of leaving the overwritten composer unsent.
+        dom.setComposerValue(input, draft);
+        throw new Error('Send button unavailable');
+      }
       firstMessageSent = true;
       replayingSubmission = true;
-      try { dom.sendButton()?.click(); } finally { replayingSubmission = false; }
+      try { button.click(); } finally { replayingSubmission = false; }
     }).catch(() => {
       const notice = doc.createElement('p'); notice.setAttribute('role', 'alert');
       notice.textContent = 'MCP Runner could not load tool instructions. Your message was not sent; reconnect servers and try again.';
@@ -109,12 +115,12 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
     const record = records[0];
     records.forEach((entry, index) => {
       const payload = payloads[index];
-      cardStatus(entry.card, payload && typeof payload === 'object' && 'error' in payload ? 'Failed — result ready' : 'Result ready');
+      cardStatus(entry.card, isFailure(payload) ? 'Failed — result ready' : 'Result ready');
       entry.card.querySelector('.mcp-card-body')!.prepend(createPayloadSection(doc, 'Response', payload));
     });
     const messages = records.map((entry, index) => {
       const payload = payloads[index];
-      const result = payload && typeof payload === 'object' && 'error' in payload ? payload : { result: payload };
+      const result = isFailure(payload) ? payload : { result: payload };
       return entry.statusQuery
         ? `\`\`\`mcp-status-result\n${JSON.stringify({ id: entry.command.id, ...result as object })}\n\`\`\``
         : `\`\`\`mcp-result\n${JSON.stringify({ id: entry.command.id, server: entry.command.server, tool: entry.command.tool, ...result as object })}\n\`\`\``;
@@ -123,7 +129,7 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
     let sending = false;
     // One random wait per batch, drawn from the sidebar-configured range.
     // Pacing failures fall back to submitting immediately.
-    const wait = await request({ type: 'snapshot' }).then(value => {
+    const wait = await request({ type: 'page-snapshot' }).then(value => {
       if (!value || typeof value !== 'object' || !('pacing' in value)) return 0;
       const response = (value as { pacing?: { response?: { min?: unknown; max?: unknown } } }).pacing?.response;
       if (!response || typeof response.min !== 'number' || typeof response.max !== 'number') return 0;
@@ -152,14 +158,25 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
         dom.setComposerValue(currentInput, text);
         let observer: MutationObserver;
         const complete = () => {
-          const currentInput = dom.composer();
-          const currentArrow = dom.sendButton();
-          if (stopped || win.location.href !== record.chat || !record.card.isConnected || !currentInput || flatten(dom.composerValue(currentInput)) !== flatten(text)) {
+          // A composer the user has typed into is not terminal: keep watching
+          // so the pending retry can re-submit once the composer clears.
+          if (sent) { observer.disconnect(); resultObservers.delete(observer); return; }
+          if (stopped || win.location.href !== record.chat || !record.card.isConnected) {
             observer.disconnect(); resultObservers.delete(observer); return;
           }
+          const currentInput = dom.composer();
+          if (!currentInput || flatten(dom.composerValue(currentInput)) !== flatten(text)) {
+            if (record.card.dataset.mcpPending !== 'true') record.card.dataset.mcpPending = 'true';
+            return;
+          }
+          const currentArrow = dom.sendButton();
           if (!currentArrow || dom.sendDisabled(currentArrow) || dom.isGenerating()) return;
           sent = true; currentArrow.click();
-          records.forEach(entry => { entry.card.dataset.mcpPending = 'false'; cardStatus(entry.card, 'Submitted'); });
+          records.forEach(entry => {
+            entry.card.dataset.mcpPending = 'false';
+            cardStatus(entry.card, 'Submitted');
+            shared.add(JSON.stringify([entry.chat, entry.command.id, entry.command.server, entry.command.tool]));
+          });
           button.remove();
           observer.disconnect(); resultObservers.delete(observer);
         };
@@ -203,7 +220,6 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
         const response = match[1].endsWith('-result');
         const sections = response ? { Result: 'result' in value ? value.result : value } : { Arguments: statusQuery ? value : 'arguments' in value ? value.arguments : {} };
         const card=createBlockCard(doc,metadata,response?'Result shared':'Display only',sections,match[0]);
-        if(response) card.dataset.mcpCorrelation=JSON.stringify([win.location.href,metadata.id,metadata.server,metadata.tool]);
         card.dataset.mcpUserBlock='true';original.insertAdjacentElement('afterend',card);original.hidden=true;
       } catch { /* Preserve malformed blocks verbatim. */ }
       }
@@ -223,10 +239,14 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
             if (action === undefined && server === undefined || (action === 'connect' || action === 'disconnect') && typeof server === 'string' && server.trim()) command = { id: value.id, server: 'MCP Runner', tool: 'Server status', arguments: action ? { action, server } : {} };
           }
         } catch { /* Preserve malformed status requests. */ }
-      } else command = decodeCommand(code || '');
+      } else {
+        try { command = decodeCommand(JSON.parse(code || '')); } catch { /* Preserve malformed blocks. */ }
+      }
       if (!command) continue;
       const key = JSON.stringify([chat, command.id]);
       const signature = JSON.stringify(command);
+      const sharedKey = JSON.stringify([chat, command.id, command.server, command.tool]);
+      if (shared.has(sharedKey)) continue;
       const prior = seen.get(key);
       if (prior !== undefined) {
         if (prior !== signature && ![...doc.querySelectorAll<HTMLElement>('[data-mcp-conflict]')].some(card => card.dataset.mcpConflict === key)) {
@@ -237,20 +257,19 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
         }
         continue;
       }
-      seen.set(key, signature);
-      const card = cardFor(container, command, key, statusQuery);
-      const shared=[...doc.querySelectorAll<HTMLElement>('[data-mcp-correlation]')].find(result=>result.dataset.mcpCorrelation===JSON.stringify([chat,command.id,command.server,command.tool]));
-      if(shared){cardStatus(card,'Result shared');continue;}
-      const record: Pending = { chat, command, card, statusQuery };
       const messageElement = dom.messageOf(container);
       if (!messageElement) continue;
+      seen.set(key, signature);
+      if (seen.size > 500) seen.delete(seen.keys().next().value as string);
+      const card = cardFor(container, command, key, statusQuery);
+      const record: Pending = { chat, command, card, statusQuery };
       let batch = batches.get(messageElement);
       if (!batch) { batch = { records: [], operations: [] }; batches.set(messageElement, batch); }
       batch.records.push(record);
       if (statusQuery) {
         const action = command.arguments.action as 'connect' | 'disconnect' | undefined;
         const server = command.arguments.server as string | undefined;
-        batch.operations.push(request({ type: 'server-status', id: command.id, chat, action, server }).catch(error => ({ error: String(error) })));
+        batch.operations.push(request({ type: 'server-status', id: command.id, chat, action, server }).catch(error => failure(String(error))));
         continue;
       }
       let finished = false;
@@ -261,7 +280,15 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
         if (checking || finished || stopped || win.location.href !== chat || !card.isConnected) return;
         checking = true;
         try {
-          const value = await request({ type: 'approval-status', command, chat });
+          let value: unknown;
+          try {
+            value = await request({ type: 'approval-status', command, chat });
+          } catch {
+            // The host restarted or the prompt expired; the card must not sit
+            // on "Awaiting approval" forever.
+            cardStatus(card, 'Approval expired — review sidebar');
+            return;
+          }
           if (finished || stopped || win.location.href !== chat) return;
           if (value && typeof value === 'object' && 'kind' in value && value.kind === 'elicitation' && 'id' in value && typeof value.id === 'string' && 'message' in value && typeof value.message === 'string') {
             if (approvalId === value.id) return;
@@ -305,7 +332,7 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
       const approvalTimer = win.setInterval(() => { void checkApproval().catch(() => {}); }, 400);
       approvalTimers.add(approvalTimer);
       const clearApproval = () => { finished = true; win.clearInterval(approvalTimer); approvalTimers.delete(approvalTimer); controls?.remove(); };
-      const operation = request({ type: 'invoke', command, chat }).catch(error => ({ error: String(error) })).finally(clearApproval);
+      const operation = request({ type: 'invoke', command, chat }).catch(error => failure(String(error))).finally(clearApproval);
       batch.operations.push(operation);
     }
     for (const batch of batches.values()) {

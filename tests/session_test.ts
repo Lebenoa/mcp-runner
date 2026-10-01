@@ -142,19 +142,21 @@ async function until(predicate: () => boolean) {
   }
   throw new Error("Scenario did not reach expected state");
 }
-Deno.test("expired HTTP session: concurrent calls share recovery and explicit disconnect terminates session", async () => {
+Deno.test("expired HTTP session: concurrent calls share recovery and are never replayed", async () => {
   const f = await setup();
   try {
     f.server.expire();
-    const results = await Promise.all([f.invoke("one"), f.invoke("two")]);
+    const results = await Promise.allSettled([f.invoke("one"), f.invoke("two")]);
     assert(
-      JSON.stringify(results).includes("one") &&
-        JSON.stringify(results).includes("two"),
-      "correlated results lost",
+      results.every((result) => result.status === "rejected") &&
+        String((results[0] as PromiseRejectedResult).reason).includes(
+          "outcome is unknown",
+        ),
+      "expired call was replayed instead of failing visibly",
     );
     assert(
-      f.server.initialized === 2 && f.server.calls === 2,
-      "recovery duplicated sessions or execution",
+      f.server.initialized === 2 && f.server.calls === 0,
+      "recovery duplicated sessions or replayed calls",
     );
     assert(
       f.host.state.connections.fixture.status === "connected" &&
@@ -170,12 +172,21 @@ Deno.test("expired HTTP session: concurrent calls share recovery and explicit di
     await f.close();
   }
 });
-Deno.test("rediscovery invalidates old classification before retry", async () => {
+Deno.test("rediscovery invalidates old classification for subsequent commands", async () => {
   const f = await setup();
   try {
     f.server.expire();
     f.server.changeTool();
-    const operation = f.invoke("changed");
+    const outcome = await Promise.allSettled([f.invoke("changed")]);
+    assert(
+      outcome[0].status === "rejected",
+      "expired call was replayed instead of failing visibly",
+    );
+    assert(
+      f.host.state.connections.fixture.status === "connected",
+      "session not restored after expiry",
+    );
+    const operation = f.invoke("changed-2");
     await until(() => f.host.state.prompts.length > 0);
     assert(
       f.server.calls === 0 && f.host.state.prompts[0].kind === "execution",
@@ -192,7 +203,7 @@ Deno.test("rediscovery invalidates old classification before retry", async () =>
     await f.close();
   }
 });
-Deno.test("repeated expiry stops after one retry and reports error", async () => {
+Deno.test("expired call restores the session but reports an unknown outcome", async () => {
   const f = await setup();
   try {
     f.server.failCalls(2);
@@ -203,9 +214,9 @@ Deno.test("repeated expiry stops after one retry and reports error", async () =>
       "retry not bounded",
     );
     assert(
-      f.host.state.connections.fixture.status === "error" &&
-        f.host.state.connections.fixture.tools.length === 0,
-      "dead session still advertised",
+      f.host.state.connections.fixture.status === "connected" &&
+        f.host.state.connections.fixture.tools.length > 0,
+      "restored session not advertised",
     );
   } finally {
     await f.close();

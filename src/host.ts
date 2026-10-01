@@ -15,24 +15,32 @@ import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validatio
 import {
   type Action,
   type Command,
+  chatKey,
+  decodeCommand,
   fingerprint,
   type Prompt,
+  redact,
   ruleKey,
   type Snapshot,
   type Tool,
 } from "./contracts.ts";
 import type { Profile } from "./contracts.ts";
 import { prefillElicitationSchema } from "./elicitation-schema.ts";
+import { createSystemPrompt } from "./system-prompt.ts";
 
 const PRESETS = ["auto-safe", "ask", "server-perms", "yolo"] as const;
 const RECONNECT_DELAY = 5000;
 const MAX_PACING = 60000;
 function pacingRange(value: unknown): { min: number; max: number } {
   const range = value as { min?: unknown; max?: unknown } | undefined;
-  return typeof range?.min === "number" && typeof range?.max === "number"
-    ? { min: range.min, max: range.max }
-    : { min: 0, max: 0 };
+  if (
+    typeof range?.min !== "number" || !Number.isSafeInteger(range.min) ||
+    typeof range?.max !== "number" || !Number.isSafeInteger(range.max)
+  ) return { min: 0, max: 0 };
+  const min = Math.min(Math.max(0, range.min), MAX_PACING);
+  return { min, max: Math.min(Math.max(range.max, min), MAX_PACING) };
 }
+const RESULT_LIMIT = 100;
 
 export class SessionHost {
   state: Snapshot = {
@@ -72,7 +80,11 @@ export class SessionHost {
   ) {}
   async restore(saved?: Partial<Snapshot>) {
     if (!saved) return;
-    this.state.profiles = saved.profiles ?? [];
+    this.state.profiles = (saved.profiles ?? []).filter((profile) =>
+      profile && typeof profile.name === "string" && !!profile.name.trim() &&
+      typeof profile.url === "string" && !!profile.url.trim() &&
+      ["http", "sse", "ws"].includes(profile.transport)
+    );
     this.state.rules = saved.rules ?? {};
     this.state.preset = saved.preset && PRESETS.includes(saved.preset)
       ? saved.preset
@@ -150,14 +162,18 @@ export class SessionHost {
     }
   }
   // Unexpected connection loss retries every RECONNECT_DELAY until the server
-  // answers; an explicit disconnect clears the timer and stops the loop.
+  // answers; an explicit disconnect clears the timer and stops the loop. A
+  // revoked endpoint permission stops the loop until the user connects again.
   private scheduleReconnect(name: string) {
     if (this.reconnectTimers.has(name) || this.clients.has(name)) return;
     const timer = setTimeout(() => {
       this.reconnectTimers.delete(name);
       const profile = this.state.profiles.find((p) => p.name === name);
       if (!profile?.reconnect) return;
-      void this.connect(name).catch(() => this.scheduleReconnect(name));
+      void this.canReconnect(profile).then((allowed) => {
+        if (!allowed) return;
+        return this.connect(name).catch(() => this.scheduleReconnect(name));
+      }).catch(() => {});
     }, RECONNECT_DELAY);
     this.reconnectTimers.set(name, timer);
   }
@@ -183,10 +199,7 @@ export class SessionHost {
         return {
           servers: this.state.profiles.map((profile) => {
             const connection = this.state.connections[profile.name];
-            const error = connection?.error?.replace(
-              /(?:https?|wss?):\/\/[^\s"'<>]+/gi,
-              "[endpoint]",
-            ).replace(/(bearer\s+|token[=:]\s*)[^\s,;]+/gi, "$1[redacted]");
+            const error = connection?.error && redact(connection.error);
             return {
               name: profile.name,
               transport: profile.transport,
@@ -197,6 +210,11 @@ export class SessionHost {
           }),
         };
       }
+      case "page-snapshot":
+        return {
+          systemPrompt: createSystemPrompt(this.state),
+          pacing: this.state.pacing,
+        };
       case "reply-elicitation": {
         const prompt = this.state.prompts.find((p) =>
           p.id === action.promptId && p.kind === "elicitation" &&
@@ -204,11 +222,17 @@ export class SessionHost {
         );
         if (
           !prompt ||
-          !this.running.has(JSON.stringify([action.chat, action.command.id])) ||
+          !this.running.has(JSON.stringify([chatKey(action.chat), action.command.id])) ||
           this.commands.get(
-              JSON.stringify([action.chat, action.command.id]),
+              JSON.stringify([chatKey(action.chat), action.command.id]),
             ) !== JSON.stringify(action.command)
         ) throw new Error("Elicitation expired or command mismatch");
+        if (
+          action.action === "accept" && prompt.schema &&
+          !new CfWorkerJsonSchemaValidator().getValidator(
+              prompt.schema as Record<string, unknown>,
+            )((action.content ?? {}) as Record<string, unknown>).valid
+        ) throw new Error("Elicitation reply does not satisfy the requested schema");
         const resolve = this.pending.get(prompt.id);
         if (!resolve) throw new Error("Elicitation expired");
         this.pending.delete(prompt.id);
@@ -276,7 +300,14 @@ export class SessionHost {
         const changedServer = original &&
           (original.url !== p.url || original.transport !== p.transport);
         for (const key of Object.keys(this.state.rules)) {
-          const [server, tool] = JSON.parse(key) as [string, string];
+          let parsed: [string, string];
+          try {
+            parsed = JSON.parse(key) as [string, string];
+          } catch {
+            delete this.state.rules[key];
+            continue;
+          }
+          const [server, tool] = parsed;
           if (server !== originalName) continue;
           const rule = this.state.rules[key];
           if (changedServer || name !== originalName) {
@@ -357,11 +388,23 @@ export class SessionHost {
         if (
           !resolve || !["accept", "decline", "cancel"].includes(action.action)
         ) throw new Error("Prompt expired or invalid response");
+        if (action.action === "accept" && action.content) {
+          const prompt = this.state.prompts.find((p) => p.id === action.id);
+          if (
+            prompt?.schema &&
+            !new CfWorkerJsonSchemaValidator().getValidator(
+                prompt.schema as Record<string, unknown>,
+              )(action.content as Record<string, unknown>).valid
+          ) throw new Error("Elicitation reply does not satisfy the requested schema");
+        }
         resolve({ action: action.action, content: action.content });
         return;
       }
-      case "invoke":
-        return await this.invoke(action.command, action.chat);
+      case "invoke": {
+        const command = decodeCommand(action.command);
+        if (!command) throw new Error("Invalid MCP command");
+        return await this.invoke(command, action.chat);
+      }
       default:
         throw new Error("Unknown action");
     }
@@ -442,6 +485,7 @@ export class SessionHost {
           // let the delayed retry rebuild the session when the server returns.
           this.clients.delete(name);
           this.transports.delete(name);
+          this.cancelServerPrompts(name);
           void client.close().catch(() => {});
           this.state.connections[name] = {
             status: "disconnected",
@@ -472,7 +516,9 @@ export class SessionHost {
       await client.connect(transport);
       const tools: Tool[] = [];
       let cursor: string | undefined;
+      let pages = 0;
       do {
+        if (++pages > 50) throw new Error("Tool list pagination exceeded 50 pages");
         const page = await client.listTools(cursor ? { cursor } : undefined);
         tools.push(...page.tools as Tool[]);
         cursor = page.nextCursor;
@@ -580,7 +626,7 @@ export class SessionHost {
       ) || !command.arguments || typeof command.arguments !== "object" ||
       Array.isArray(command.arguments)
     ) throw new Error("Invalid MCP command");
-    const key = JSON.stringify([chat ?? "sidebar", command.id]);
+    const key = JSON.stringify([chatKey(chat), command.id]);
     const signature = JSON.stringify(command);
     const prior = this.commands.get(key);
     if (prior && prior !== signature) {
@@ -596,10 +642,12 @@ export class SessionHost {
     try {
       const result = await task;
       this.state.results[key] = result;
+      this.pruneResults();
       await this.persist(this.state);
       return result;
     } catch (error) {
       this.state.results[key] = { error: String(error) };
+      this.pruneResults();
       await this.persist(this.state);
       throw error;
     } finally {
@@ -618,11 +666,13 @@ export class SessionHost {
       }
     }
   }
-  private async execute(
-    command: Command,
-    chat?: string,
-    retry = true,
-  ): Promise<unknown> {
+  private pruneResults() {
+    const keys = Object.keys(this.state.results);
+    for (const key of keys.slice(0, keys.length - RESULT_LIMIT)) {
+      delete this.state.results[key];
+    }
+  }
+  private async execute(command: Command, chat?: string): Promise<unknown> {
     const recovery = this.recovering.get(command.server);
     if (recovery) await recovery;
     const client = this.clients.get(command.server);
@@ -668,6 +718,9 @@ export class SessionHost {
       await new Promise((resolve) =>
         setTimeout(resolve, pacing.min + Math.random() * (pacing.max - pacing.min))
       );
+      if (this.clients.get(command.server) !== client) {
+        throw new Error("Disconnected during execution delay");
+      }
     }
     let result;
     const requestedTimeout = command.arguments.timeout_ms;
@@ -700,20 +753,20 @@ export class SessionHost {
       }
     } catch (error) {
       if (this.expired(command.server, error)) {
-        if (retry) {
+        // A lost session cannot establish whether the server executed the
+        // command — restore the session for subsequent commands, never replay.
+        try {
           await this.recover(command.server, client);
-          return await this.execute(command, chat, false);
+        } catch (recoveryError) {
+          throw new Error(
+            `${String(error)}; session restoration failed: ${
+              String(recoveryError)
+            }`,
+          );
         }
-        if (this.clients.get(command.server) === client) {
-          this.clients.delete(command.server);
-          this.transports.delete(command.server);
-          await client.close().catch(() => {});
-          this.state.connections[command.server] = {
-            status: "error",
-            tools: [],
-            error: String(error),
-          };
-        }
+        throw new Error(
+          `${String(error)}; the session expired during the call, so its outcome is unknown. The session was restored — re-issue this command with a new ID.`,
+        );
       }
       if (
         error instanceof McpError &&
@@ -751,7 +804,7 @@ export class SessionHost {
       const response = await reply;
       if (response.action !== "accept") {
         this.state.results[
-          JSON.stringify(["private", chat ?? "sidebar", command.id])
+          JSON.stringify(["private", chatKey(chat), command.id])
         ] = result;
         throw new Error(
           response.action === "cancel"

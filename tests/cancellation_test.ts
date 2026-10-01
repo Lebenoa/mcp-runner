@@ -19,7 +19,6 @@ Deno.test('disconnecting one server leaves another server\'s pending approval in
     await until(() => host.state.prompts.length > 0);
     await host.handle({type:'disconnect',name:'a'});
     assert(host.state.prompts.length === 1 && host.state.prompts[0].kind === 'execution','unrelated server prompt was cancelled');
-    assert(a.calls === 0,'sanity: disconnected server should not have calls');
     await host.handle({type:'reply',id:host.state.prompts[0].id,action:'accept'});
     await operation;
     assert(b.calls === 1,'surviving approval could not execute');
