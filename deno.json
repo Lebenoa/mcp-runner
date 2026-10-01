@@ -1,0 +1,23 @@
+{
+  "nodeModulesDir": "auto",
+  "tasks": {
+    "build": "deno run -A npm:wxt build && deno run -A npm:wxt build -b firefox",
+    "dev": "deno run -A npm:wxt",
+    "test": "deno test -A tests/",
+    "test:helium": "pwsh -NoProfile -File scripts/test-helium.ps1",
+    "prepare": "deno run -A npm:wxt prepare"
+  },
+  "compilerOptions": {
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "deno.ns"
+    ],
+    "strict": true
+  },
+  "exclude": [
+    "node_modules",
+    ".output",
+    ".wxt"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "mcp-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "eventsource-parser": "^3.0.0",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "wxt": "^0.20.0",
+    "@playwright/test": "^1.56.0"
+  }
+}

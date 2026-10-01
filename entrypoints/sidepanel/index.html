@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MCP Runner</title>
+</head>
+
+<body>
+  <main id="app" aria-label="MCP Runner sidebar">
+    <header>
+      <div>
+        <p class="eyebrow">MCP RUNNER</p>
+        <h1 id="page-title">Servers</h1>
+      </div><span id="connection-count" class="pill">Loading…</span>
+    </header>
+    <p id="error" role="alert" hidden></p>
+    <nav class="tabs" role="tablist" aria-label="Sidebar tasks">
+      <button id="tab-servers" type="button" role="tab" aria-selected="true"
+        aria-controls="panel-servers">Servers</button>
+      <button id="tab-tools" type="button" role="tab" aria-selected="false" aria-controls="panel-tools"
+        tabindex="-1">Tools</button>
+      <button id="tab-activity" type="button" role="tab" aria-selected="false" aria-controls="panel-activity"
+        tabindex="-1">Activity <span id="pending-count" class="activity-badge" hidden></span></button>
+      <button id="tab-settings" type="button" role="tab" aria-selected="false" aria-controls="panel-settings"
+        tabindex="-1">Settings</button>
+    </nav>
+    <div id="panel-servers" role="tabpanel" aria-labelledby="tab-servers" tabindex="0">
+      <section class="panel" aria-labelledby="profiles-title">
+        <div class="section-heading">
+          <h2 id="profiles-title">Saved profiles</h2><button id="new-profile" class="quiet" type="button">＋ New</button>
+        </div>
+        <div id="profiles" class="stack"></div>
+        <form id="profile-form" class="profile-form" hidden>
+          <label>Profile name<input name="name" required maxlength="80" autocomplete="off" /></label>
+          <label>Server URL<input name="url" required type="url" placeholder="https://localhost:8000/mcp" /></label>
+          <label>Transport<select name="transport">
+              <option value="http">Streamable HTTP</option>
+              <option value="sse">HTTP + SSE</option>
+              <option value="ws">WebSocket</option>
+            </select></label>
+          <div class="actions"><button class="primary" type="submit">Save profile</button><button id="cancel-profile"
+              type="button" class="quiet">Cancel</button></div>
+        </form>
+      </section>
+    </div>
+    <div id="panel-tools" role="tabpanel" aria-labelledby="tab-tools" tabindex="0" hidden>
+      <section class="panel">
+        <div class="section-heading">
+          <h2>Tools &amp; review</h2>
+        </div>
+        <div id="tools" class="stack">
+          <p class="muted">Connect a server to discover its tools.</p>
+        </div>
+      </section>
+    </div>
+    <div id="panel-activity" role="tabpanel" aria-labelledby="tab-activity" tabindex="0" hidden>
+      <section class="panel">
+        <div class="section-heading">
+          <h2>Pending prompts</h2>
+        </div>
+        <div id="prompts" class="stack">
+          <p class="muted">No pending prompts.</p>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="section-heading">
+          <h2>Results</h2>
+        </div>
+        <div id="results" class="stack">
+          <p class="muted">No completed tool calls.</p>
+        </div>
+      </section>
+    </div>
+    <div id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" tabindex="0" hidden>
+      <section class="panel">
+        <div class="section-heading">
+          <h2>Permission preset</h2>
+        </div>
+        <label class="sr-only" for="preset">Permission preset</label><select id="preset">
+          <option value="auto-safe">Auto-safe · reviewed read-only</option>
+          <option value="ask">Ask · every call</option>
+          <option value="server-perms">Server Perms · server allowed tools</option>
+          <option value="yolo">Yolo · full approval</option>
+        </select>
+        <p class="hint">Server Perms executes server-exposed tools and shares results; server elicitation still asks.
+          YOLO
+          also accepts elicitation with fixed/default values. Missing input and URL-based consent still need user
+          interaction.</p>
+      </section>
+      <section class="panel" aria-labelledby="system-prompt-title">
+        <div class="section-heading">
+          <h2 id="system-prompt-title">System prompt</h2><button id="copy-system-prompt" type="button"
+            class="quiet">Copy</button>
+        </div>
+        <p class="hint">Tool instructions are prepended to the first message in a new DeepSeek conversation as
+          user-message content.</p>
+        <label class="form-field" for="prompt-editor">Custom instructions</label>
+        <textarea id="prompt-editor" rows="8" spellcheck="false"
+          aria-label="Custom tool instructions, replacing the defaults"></textarea>
+        <div class="actions"><button id="save-prompt" type="button" class="primary">Save
+            instructions</button><button id="reset-prompt" type="button" class="quiet">Reset to
+            default</button></div>
+        <p class="muted">Leave empty for the default instructions. The tool list is always regenerated from
+          connected servers and appended beneath your text.</p>
+        <details>
+          <summary>Preview instructions and available tools</summary>
+          <pre id="system-prompt"></pre>
+        </details>
+        <p id="system-prompt-copy-state" class="muted" role="status"></p>
+      </section>
+      <footer><button id="deepseek" type="button" class="quiet">Enable DeepSeek access</button><span id="deepseek-state"
+          class="muted">Optional</span></footer>
+    </div>
+  </main>
+  <script type="module" src="./main.ts"></script>
+</body>
+
+</html>
