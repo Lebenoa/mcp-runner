@@ -4,7 +4,8 @@ Connect MCP servers to your browser sidebar and use their tools in supported AI 
 
 > Built for [gredit-mcp](https://github.com/Lebenoa/gredit-mcp), but can be used with any other MCP server.
 
-> **Warning:** MCP Runner executes tools on servers you connect, and it runs tool calls that an AI model decides to emit. A misconfigured, compromised, or malicious server — or a model influenced by prompt injection — can cause destructive actions or expose sensitive data. Tool classifications and approvals are your judgment calls, not verified safety. Review tools before trusting them, prefer Auto-safe or Ask over the permissive presets, read every approval and disclosure prompt, and only connect servers you trust. You are responsible for the servers you connect and the actions you approve.
+> [!WARNING]
+> MCP Runner automates a chat provider (DeepSeek) through browser scripting and runs tool calls that an AI model emits. Automating a provider's chat interface can violate that provider's terms of service or acceptable-use policy, and may lead to restricted or terminated accounts — review your provider's policy before enabling site access. Tool calls can also perform destructive actions on the servers you connect. You are responsible for the servers you connect, the actions you approve, and any consequences under your provider's policy.
 
 ![Language: TypeScript](https://img.shields.io/badge/lang-TypeScript-3178C6)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
