@@ -5,7 +5,7 @@ Connect MCP servers to your browser sidebar and use their tools in supported AI 
 > Built for [gredit-mcp](https://github.com/Lebenoa/gredit-mcp), but can be used with any other MCP server.
 
 > [!WARNING]
-> MCP Runner automates a chat provider (DeepSeek) through browser scripting and runs tool calls that an AI model emits. Automating a provider's chat interface can violate that provider's terms of service or acceptable-use policy, and may lead to restricted or terminated accounts — review your provider's policy before enabling site access. Tool calls can also perform destructive actions on the servers you connect. You are responsible for the servers you connect, the actions you approve, and any consequences under your provider's policy.
+> MCP Runner automates chat providers (DeepSeek, ChatGPT) through browser scripting and runs tool calls that an AI model emits. Automating a provider's chat interface can violate that provider's terms of service or acceptable-use policy, and may lead to restricted or terminated accounts — review your provider's policy before enabling site access. Tool calls can also perform destructive actions on the servers you connect. You are responsible for the servers you connect, the actions you approve, and any consequences under your provider's policy.
 
 ![Language: TypeScript](https://img.shields.io/badge/lang-TypeScript-3178C6)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
@@ -29,6 +29,7 @@ Connect MCP servers to your browser sidebar and use their tools in supported AI 
 | Site | Capability |
 | --- | --- |
 | [DeepSeek](https://chat.deepseek.com) | Automatic tool execution in new conversations |
+| [ChatGPT](https://chatgpt.com) | Automatic tool execution in new conversations (adapter targets current site markup and may need updates after ChatGPT UI changes) |
 
 The sidebar itself works independently of any site, and servers can be hosted anywhere reachable by the browser. Support for additional chat providers is planned.
 
@@ -180,7 +181,7 @@ pwsh -NoProfile -File scripts/test-helium.ps1 -BrowserPath "BROWSER_PATH"
 - **A batch is waiting:** check pending approvals and elicitation, then clear or send your composer draft.
 - **Workspace approval timed out:** retry with a new call ID. In non-YOLO modes, approve the server's canonical path before the timeout.
 - **After an extension update:** reload the extension and chat tab to load the new content script.
-- **Chat integration stops working:** page markup changes can require an adapter update. Only the currently implemented chat adapter supports automatic tool execution; support for additional providers is planned.
+- **Chat integration stops working:** page markup changes can require an adapter update. DeepSeek and ChatGPT are currently implemented; support for additional providers is planned.
 - **Firefox distribution:** builds are available for temporary loading; store publication is not configured. Browser UI verification has been exercised in Chromium/Helium, not Firefox.
 
 ## License

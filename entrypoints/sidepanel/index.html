@@ -95,7 +95,7 @@
             class="quiet">Copy tool schemas</button><button id="copy-system-prompt" type="button"
             class="quiet">Copy</button>
         </div>
-        <p class="hint">Tool instructions are prepended to the first message in a new DeepSeek conversation as
+        <p class="hint">Tool instructions are prepended to the first message in a new supported chat as
           user-message content.</p>
         <label class="form-field" for="prompt-editor">Custom instructions</label>
         <textarea id="prompt-editor" rows="8" spellcheck="false"
@@ -138,7 +138,8 @@
             delay</button></div>
       </section>
       <footer><button id="deepseek" type="button" class="quiet">Enable DeepSeek access</button><span id="deepseek-state"
-          class="muted">Optional</span></footer>
+          class="muted">Optional</span><button id="chatgpt" type="button" class="quiet">Enable ChatGPT
+          access</button><span id="chatgpt-state" class="muted">Optional</span></footer>
     </div>
   </main>
   <script type="module" src="./main.ts"></script>

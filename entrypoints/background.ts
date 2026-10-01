@@ -25,15 +25,20 @@ export default defineBackground(() => {
     })().catch(error => { ready = undefined; throw error; });
     await ready;
   }
-  async function registerDeepSeek() {
-    const granted = await browser.permissions.contains({ origins:['https://chat.deepseek.com/*'] });
-    const registered = await browser.scripting.getRegisteredContentScripts({ ids:['deepseek'] });
-    if (granted && !registered.length) await browser.scripting.registerContentScripts([{ id:'deepseek', matches:['https://chat.deepseek.com/*'], js:['content-scripts/deepseek.js'], runAt:'document_idle' }]);
-    if (!granted && registered.length) await browser.scripting.unregisterContentScripts({ ids:['deepseek'] });
+  async function registerChats() {
+    for (const site of [
+      { id: 'deepseek', matches: ['https://chat.deepseek.com/*'], js: 'content-scripts/deepseek.js' },
+      { id: 'chatgpt', matches: ['https://chatgpt.com/*'], js: 'content-scripts/chatgpt.js' },
+    ]) {
+      const granted = await browser.permissions.contains({ origins: site.matches });
+      const registered = await browser.scripting.getRegisteredContentScripts({ ids: [site.id] });
+      if (granted && !registered.length) await browser.scripting.registerContentScripts([{ id: site.id, matches: site.matches, js: [site.js], runAt: 'document_idle' }]);
+      if (!granted && registered.length) await browser.scripting.unregisterContentScripts({ ids: [site.id] });
+    }
   }
-  browser.permissions.onAdded.addListener(() => { void registerDeepSeek(); });
-  browser.permissions.onRemoved.addListener(() => { void registerDeepSeek(); });
-  void registerDeepSeek();
+  browser.permissions.onAdded.addListener(() => { void registerChats(); });
+  browser.permissions.onRemoved.addListener(() => { void registerChats(); });
+  void registerChats();
   if (import.meta.env.BROWSER === 'firefox') {
     browser.browserAction.onClicked.addListener(() => { void browser.sidebarAction.toggle(); });
     void ensureHost();
@@ -55,7 +60,7 @@ export default defineBackground(() => {
         if (page) {
           const currentTab = await browser.tabs.get(sender.tab!.id!);
           const url = new URL(currentTab.url ?? sender.url ?? '');
-          if (url.origin !== 'https://chat.deepseek.com' || sender.frameId !== 0) throw new Error('Unauthorized page');
+          if (!['https://chat.deepseek.com', 'https://chatgpt.com'].includes(url.origin) || sender.frameId !== 0) throw new Error('Unauthorized page');
           if (!['invoke','snapshot','server-status','approval-status','approve-command','reply-elicitation'].includes(action.type)) throw new Error('Page cannot manage extension');
           if ((action.type === 'invoke' || action.type === 'server-status' || action.type === 'approval-status' || action.type === 'approve-command' || action.type === 'reply-elicitation') && action.chat !== url.href) throw new Error('Command chat does not match sender');
         } else if (!sidebar) throw new Error('Unauthorized extension page');
@@ -71,8 +76,7 @@ export default defineBackground(() => {
           const state = reply.value as Snapshot;
           reply.value = { systemPrompt: createSystemPrompt(state), pacing: state.pacing };
         }
-        return reply;
-      } catch(error) { return { ok:false, error:String(error) }; }
+        return reply;      } catch(error) { return { ok:false, error:String(error) }; }
     })();
   });
   void ensureHost().catch(error => console.error('MCP startup reconnect failed', error));

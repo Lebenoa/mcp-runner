@@ -276,12 +276,17 @@ $('#save-execution-delay').addEventListener('click', () => {
 $('#save-response-delay').addEventListener('click', () => {
   void act({ type: 'response-delay', min: Number(responseMin.value) || 0, max: Number(responseMax.value) || 0 });
 });
-$('#deepseek').addEventListener('click', async () => {
-  $('#error').hidden = true;
-  try {
-    const granted = await browser.permissions.request({ origins: ['https://chat.deepseek.com/*'] });
-    if (!granted) throw new Error('DeepSeek site access was not granted.');
-    $('#deepseek-state').textContent = 'Access granted';
-  } catch (error) { showError(error); }
-});
+for (const [buttonId, stateId, origin, label] of [
+  ['deepseek', 'deepseek-state', 'https://chat.deepseek.com/*', 'DeepSeek site access'],
+  ['chatgpt', 'chatgpt-state', 'https://chatgpt.com/*', 'ChatGPT site access'],
+] as const) {
+  $(`#${buttonId}`).addEventListener('click', async () => {
+    $('#error').hidden = true;
+    try {
+      const granted = await browser.permissions.request({ origins: [origin] });
+      if (!granted) throw new Error(`${label} was not granted.`);
+      $(`#${stateId}`).textContent = 'Access granted';
+    } catch (error) { showError(error); }
+  });
+}
 void refresh(); window.setInterval(() => void refresh(), 1200);
