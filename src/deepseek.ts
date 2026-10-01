@@ -98,9 +98,9 @@ export function startDeepSeekAdapter(request: Request, doc: Document = document,
     // Pacing failures fall back to submitting immediately.
     const wait = await request({ type: 'snapshot' }).then(value => {
       if (!value || typeof value !== 'object' || !('pacing' in value)) return 0;
-      const pacing = (value as { pacing?: { min?: unknown; max?: unknown } }).pacing;
-      if (!pacing || typeof pacing !== 'object' || typeof pacing.min !== 'number' || typeof pacing.max !== 'number') return 0;
-      const min = Math.max(0, pacing.min), max = Math.max(0, pacing.max);
+      const response = (value as { pacing?: { response?: { min?: unknown; max?: unknown } } }).pacing?.response;
+      if (!response || typeof response.min !== 'number' || typeof response.max !== 'number') return 0;
+      const min = Math.max(0, response.min), max = Math.max(0, response.max);
       return max > 0 ? min + Math.random() * Math.max(0, max - min) : 0;
     }).catch(() => 0);
     const submit = () => {

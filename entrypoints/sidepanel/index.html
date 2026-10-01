@@ -111,17 +111,31 @@
         </details>
         <p id="system-prompt-copy-state" class="muted" role="status"></p>
       </section>
-      <section class="panel" aria-labelledby="pacing-title">
+      <section class="panel" aria-labelledby="execution-delay-title">
         <div class="section-heading">
-          <h2 id="pacing-title">Automation delay</h2>
+          <h2 id="execution-delay-title">Execution delay</h2>
         </div>
-        <p class="hint">Random wait before executing a tool call and before sending results back to the chat.
-          Drawn uniformly between minimum and maximum; a maximum of 0 disables the delay.</p>
-        <label class="form-field">Minimum delay (ms)<input id="pacing-min" type="number" min="0" max="60000"
+        <p class="hint">Random wait before a tool call is executed, in milliseconds. Drawn uniformly between
+          minimum and maximum; a maximum of 0 disables it.</p>
+        <label class="form-field">Minimum delay (ms)<input id="execution-min" type="number" min="0" max="60000"
             step="100" value="0" /></label>
-        <label class="form-field">Maximum delay (ms)<input id="pacing-max" type="number" min="0" max="60000"
+        <label class="form-field">Maximum delay (ms)<input id="execution-max" type="number" min="0" max="60000"
             step="100" value="0" /></label>
-        <div class="actions"><button id="save-pacing" type="button" class="primary">Save delay</button></div>
+        <div class="actions"><button id="save-execution-delay" type="button" class="primary">Save execution
+            delay</button></div>
+      </section>
+      <section class="panel" aria-labelledby="response-delay-title">
+        <div class="section-heading">
+          <h2 id="response-delay-title">Result send delay</h2>
+        </div>
+        <p class="hint">Random wait before tool results are sent back to the chat, in milliseconds. Drawn
+          uniformly between minimum and maximum; a maximum of 0 disables it.</p>
+        <label class="form-field">Minimum delay (ms)<input id="response-min" type="number" min="0" max="60000"
+            step="100" value="0" /></label>
+        <label class="form-field">Maximum delay (ms)<input id="response-max" type="number" min="0" max="60000"
+            step="100" value="0" /></label>
+        <div class="actions"><button id="save-response-delay" type="button" class="primary">Save result send
+            delay</button></div>
       </section>
       <footer><button id="deepseek" type="button" class="quiet">Enable DeepSeek access</button><span id="deepseek-state"
           class="muted">Optional</span></footer>

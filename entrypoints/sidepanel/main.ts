@@ -16,8 +16,10 @@ const promptDrafts: Record<string, Record<string, string>> = {};
 const promptEditor = $('#prompt-editor') as HTMLTextAreaElement;
 let promptEditorDirty = false;
 promptEditor.addEventListener('input', () => { promptEditorDirty = true; });
-const pacingMin = $('#pacing-min') as HTMLInputElement;
-const pacingMax = $('#pacing-max') as HTMLInputElement;
+const executionMin = $('#execution-min') as HTMLInputElement;
+const executionMax = $('#execution-max') as HTMLInputElement;
+const responseMin = $('#response-min') as HTMLInputElement;
+const responseMax = $('#response-max') as HTMLInputElement;
 
 const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
 function selectTab(tab: HTMLButtonElement, focus = false) {
@@ -205,9 +207,15 @@ function render(s: Snapshot) {
   }
   if (JSON.stringify(previous?.prompts) !== JSON.stringify(s.prompts)) renderPrompts(s);
   if (JSON.stringify(previous?.results) !== JSON.stringify(s.results)) renderResults(s);
-  if (JSON.stringify(previous?.pacing) !== JSON.stringify(s.pacing) && document.activeElement !== pacingMin && document.activeElement !== pacingMax) {
-    pacingMin.value = String(s.pacing.min);
-    pacingMax.value = String(s.pacing.max);
+  if (JSON.stringify(previous?.pacing) !== JSON.stringify(s.pacing)) {
+    if (document.activeElement !== executionMin && document.activeElement !== executionMax) {
+      executionMin.value = String(s.pacing.execution.min);
+      executionMax.value = String(s.pacing.execution.max);
+    }
+    if (document.activeElement !== responseMin && document.activeElement !== responseMax) {
+      responseMin.value = String(s.pacing.response.min);
+      responseMax.value = String(s.pacing.response.max);
+    }
   }
   const connected = Object.values(s.connections).filter(c => c.status === 'connected').length;
   $('#connection-count').textContent = `${connected} connected`;
@@ -262,8 +270,11 @@ $('#reset-prompt').addEventListener('click', async () => {
   const saved = await act({ type: 'custom-prompt' });
   if (saved) promptEditorDirty = false;
 });
-$('#save-pacing').addEventListener('click', () => {
-  void act({ type: 'pacing', min: Number(pacingMin.value) || 0, max: Number(pacingMax.value) || 0 });
+$('#save-execution-delay').addEventListener('click', () => {
+  void act({ type: 'execution-delay', min: Number(executionMin.value) || 0, max: Number(executionMax.value) || 0 });
+});
+$('#save-response-delay').addEventListener('click', () => {
+  void act({ type: 'response-delay', min: Number(responseMin.value) || 0, max: Number(responseMax.value) || 0 });
 });
 $('#deepseek').addEventListener('click', async () => {
   $('#error').hidden = true;

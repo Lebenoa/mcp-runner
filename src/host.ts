@@ -27,6 +27,12 @@ import { prefillElicitationSchema } from "./elicitation-schema.ts";
 const PRESETS = ["auto-safe", "ask", "server-perms", "yolo"] as const;
 const RECONNECT_DELAY = 5000;
 const MAX_PACING = 60000;
+function pacingRange(value: unknown): { min: number; max: number } {
+  const range = value as { min?: unknown; max?: unknown } | undefined;
+  return typeof range?.min === "number" && typeof range?.max === "number"
+    ? { min: range.min, max: range.max }
+    : { min: 0, max: 0 };
+}
 
 export class SessionHost {
   state: Snapshot = {
@@ -36,7 +42,7 @@ export class SessionHost {
     rules: {},
     prompts: [],
     results: {},
-    pacing: { min: 0, max: 0 },
+    pacing: { execution: { min: 0, max: 0 }, response: { min: 0, max: 0 } },
   };
   private clients = new Map<string, Client>();
   private transports = new Map<
@@ -73,11 +79,10 @@ export class SessionHost {
       : "auto-safe";
     this.state.results = saved.results ?? {};
     this.state.customPrompt = saved.customPrompt;
-    this.state.pacing = saved.pacing &&
-        typeof saved.pacing.min === "number" &&
-        typeof saved.pacing.max === "number"
-      ? { min: saved.pacing.min, max: saved.pacing.max }
-      : { min: 0, max: 0 };
+    this.state.pacing = {
+      execution: pacingRange(saved.pacing?.execution),
+      response: pacingRange(saved.pacing?.response),
+    };
     for (const profile of this.state.profiles) {
       this.state.connections[profile.name] = {
         status: "disconnected",
@@ -315,13 +320,16 @@ export class SessionHost {
         await this.persist(this.state);
         return;
       }
-      case "pacing": {
+      case "execution-delay":
+      case "response-delay": {
         const { min, max } = action;
         if (
           !Number.isSafeInteger(min) || !Number.isSafeInteger(max) ||
           min < 0 || max < min || max > MAX_PACING
         ) throw new Error("Invalid delay range");
-        this.state.pacing = { min, max };
+        this.state.pacing[
+          action.type === "execution-delay" ? "execution" : "response"
+        ] = { min, max };
         await this.persist(this.state);
         return;
       }
@@ -655,7 +663,7 @@ export class SessionHost {
     if (this.clients.get(command.server) !== client) {
       throw new Error("Disconnected while awaiting approval");
     }
-    const pacing = this.state.pacing;
+    const pacing = this.state.pacing.execution;
     if (pacing.max > 0) {
       await new Promise((resolve) =>
         setTimeout(resolve, pacing.min + Math.random() * (pacing.max - pacing.min))
