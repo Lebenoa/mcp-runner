@@ -1,5 +1,6 @@
 export function startServer() {
   const streams = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
+  const sockets = new Set<WebSocket>();
   let calls = 0;
   const encoder = new TextEncoder();
   const tool = { name:'echo', description:'Echo a value', inputSchema:{ type:'object', properties:{ value:{type:'string'} }, required:['value'] }, outputSchema:{ type:'object', properties:{value:{type:'string'}},required:['value'] }, annotations:{ readOnlyHint:true } };
@@ -14,6 +15,8 @@ export function startServer() {
     const url = new URL(request.url);
     if (url.pathname === '/ws') {
       const {socket,response:upgrade} = Deno.upgradeWebSocket(request,{protocol:'mcp'});
+      socket.onopen = () => { sockets.add(socket); };
+      socket.onclose = () => { sockets.delete(socket); };
       let toolId: unknown;
       socket.onmessage = event => {
         const message=JSON.parse(event.data);
@@ -45,5 +48,5 @@ export function startServer() {
     if (!result) return new Response(null,{status:202});
     return Response.json(result,{headers:{'Mcp-Session-Id':'fixture-session'}});
   });
-  return {url:`http://127.0.0.1:${server.addr.port}`, get calls(){return calls;}, tool, async close(){ for(const controller of streams.values()) { try {controller.close();}catch{} } await server.shutdown(); }};
+  return {url:`http://127.0.0.1:${server.addr.port}`, get calls(){return calls;}, tool, closeSockets(){ for(const socket of [...sockets]) { try {socket.close();} catch{} } }, async close(){ for(const controller of streams.values()) { try {controller.close();}catch{} } await server.shutdown(); }};
 }

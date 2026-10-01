@@ -136,6 +136,8 @@ Disconnect a profile before selecting **Edit**. Change its name, URL, or transpo
 
 Successfully connected profiles reconnect at startup. Explicitly disconnecting or editing one disables automatic reconnection until you connect again. Offline servers show an error; select **Connect** to retry after starting them. Profiles saved before this feature need one successful connection to enable it.
 
+If a live connection drops unexpectedly — for example the server restarts — the host tears down the dead session and retries the connection every 5 seconds until the server answers. Disconnecting explicitly stops the retries.
+
 ## Development
 
 The project uses TypeScript and WXT with Deno tooling. Start development with:

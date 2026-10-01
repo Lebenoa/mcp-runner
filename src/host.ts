@@ -25,6 +25,7 @@ import type { Profile } from "./contracts.ts";
 import { prefillElicitationSchema } from "./elicitation-schema.ts";
 
 const PRESETS = ["auto-safe", "ask", "server-perms", "yolo"] as const;
+const RECONNECT_DELAY = 5000;
 
 export class SessionHost {
   state: Snapshot = {
@@ -55,6 +56,7 @@ export class SessionHost {
   >();
   private running = new Map<string, Promise<unknown>>();
   private commands = new Map<string, string>();
+  private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
   constructor(
     private persist: (state: Snapshot) => Promise<void>,
     private canReconnect: (profile: Profile) => Promise<boolean> = async () =>
@@ -134,6 +136,18 @@ export class SessionHost {
           : prompt.command?.server) === name
       ) resolve({ action: "cancel" });
     }
+  }
+  // Unexpected connection loss retries every RECONNECT_DELAY until the server
+  // answers; an explicit disconnect clears the timer and stops the loop.
+  private scheduleReconnect(name: string) {
+    if (this.reconnectTimers.has(name) || this.clients.has(name)) return;
+    const timer = setTimeout(() => {
+      this.reconnectTimers.delete(name);
+      const profile = this.state.profiles.find((p) => p.name === name);
+      if (!profile?.reconnect) return;
+      void this.connect(name).catch(() => this.scheduleReconnect(name));
+    }, RECONNECT_DELAY);
+    this.reconnectTimers.set(name, timer);
   }
   async handle(action: Action): Promise<unknown> {
     switch (action.type) {
@@ -393,10 +407,25 @@ export class SessionHost {
         this.transports.delete(name);
         this.state.connections[name] = { status: "disconnected", tools: [] };
         this.cancelServerPrompts(name);
+        this.scheduleReconnect(name);
       }
     };
     client.onerror = (error: Error) => {
       if (this.clients.get(name) === client) {
+        if (/Maximum reconnection attempts/.test(String(error))) {
+          // The SSE stream gave up; the client is a zombie. Tear it down and
+          // let the delayed retry rebuild the session when the server returns.
+          this.clients.delete(name);
+          this.transports.delete(name);
+          void client.close().catch(() => {});
+          this.state.connections[name] = {
+            status: "disconnected",
+            tools: [],
+            error: String(error),
+          };
+          this.scheduleReconnect(name);
+          return;
+        }
         const connection = this.state.connections[name];
         this.state.connections[name] = { ...connection, error: String(error) };
         if (
@@ -483,6 +512,9 @@ export class SessionHost {
     }
   }
   private async disconnect(name: string) {
+    const timer = this.reconnectTimers.get(name);
+    if (timer !== undefined) clearTimeout(timer);
+    this.reconnectTimers.delete(name);
     const client = this.clients.get(name);
     this.clients.delete(name);
     const transport = this.transports.get(name);
