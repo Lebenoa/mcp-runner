@@ -2,7 +2,7 @@ import { browser } from 'wxt/browser';
 import type { Action, Profile, Rule, Snapshot } from '../../src/contracts';
 import { fingerprint, originFor, ruleKey } from '../../src/contracts';
 import { request, snapshot } from '../../src/bridge';
-import { createSystemPrompt, DEFAULT_INSTRUCTIONS } from '../../src/system-prompt.ts';
+import { createSystemPrompt, toolSchemas, DEFAULT_INSTRUCTIONS } from '../../src/system-prompt.ts';
 import './style.css';
 
 const $ = <T extends HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
@@ -229,10 +229,24 @@ form.addEventListener('submit', event => {
   void act({ type: 'save', profile, originalName: editingProfile }).then(saved => { if (saved) { editingProfile = undefined; form.reset(); form.hidden = true; } });
 });
 $('#preset').addEventListener('change', event => void act({ type: 'preset', preset: (event.currentTarget as HTMLSelectElement).value as Snapshot['preset'] }));
-$('#copy-system-prompt').addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText($('#system-prompt').textContent ?? ''); $('#system-prompt-copy-state').textContent = 'Copied'; }
-  catch (error) { showError(error); }
-});
+async function copyText(text: string, label: string) {
+  const status = $('#system-prompt-copy-state');
+  try {
+    await navigator.clipboard.writeText(text);
+    status.textContent = label;
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = text; area.setAttribute('readonly', '');
+    area.style.position = 'fixed'; area.style.opacity = '0';
+    document.body.append(area); area.select();
+    const copied = document.execCommand('copy');
+    area.remove();
+    status.textContent = copied ? label : '';
+    if (!copied) showError(new Error('Clipboard unavailable in this panel'));
+  }
+}
+$('#copy-system-prompt').addEventListener('click', () => { void copyText($('#system-prompt').textContent ?? '', 'Copied'); });
+$('#copy-tool-schemas').addEventListener('click', () => { if (state) void copyText(toolSchemas(state), 'Copied tool schemas'); });
 $('#save-prompt').addEventListener('click', async () => {
   const saved = await act({ type: 'custom-prompt', text: promptEditor.value.trim() || undefined });
   if (saved) promptEditorDirty = false;

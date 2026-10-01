@@ -15,11 +15,19 @@ export const DEFAULT_INSTRUCTIONS = [
   'Auto-safe uses saved tool reviews; Ask prompts for execution. Server Perms executes server-exposed tools and shares results without client approval but keeps server elicitation interactive. YOLO also auto-accepts form elicitation when required values are provided by constants/defaults; missing user information and URL-based consent remain interactive. No mode unlocks tools disabled by a server.',
 ].join('\n');
 
-export function createSystemPrompt(state: Pick<Snapshot, 'connections' | 'customPrompt'>): string {
-  const tools = Object.entries(state.connections).flatMap(([server, connection]) =>
+function connectedTools(state: Pick<Snapshot, 'connections'>) {
+  return Object.entries(state.connections).flatMap(([server, connection]) =>
     connection.status === 'connected'
       ? connection.tools.map(tool => ({ server, tool: tool.name, description: tool.description ?? '', inputSchema: tool.inputSchema }))
       : []);
+}
+
+export function toolSchemas(state: Pick<Snapshot, 'connections'>): string {
+  return JSON.stringify(connectedTools(state), null, 2);
+}
+
+export function createSystemPrompt(state: Pick<Snapshot, 'connections' | 'customPrompt'>): string {
+  const tools = connectedTools(state);
   const custom = state.customPrompt?.trim();
   return [
     custom ? custom : DEFAULT_INSTRUCTIONS,
