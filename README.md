@@ -21,6 +21,14 @@ Connect MCP servers to your browser sidebar and use their tools in supported AI 
 - Return multiple tool results together in one chat message.
 - Reconnect previously connected servers when the extension starts.
 
+## Supported sites
+
+| Site | Capability |
+| --- | --- |
+| [DeepSeek](https://chat.deepseek.com) | Automatic tool execution in new conversations |
+
+The sidebar itself works independently of any site, and servers can be hosted anywhere reachable by the browser. Support for additional chat providers is planned.
+
 ## Installation
 
 Download a prebuilt extension zip from the [Releases](https://github.com/Lebenoa/mcp-runner/releases) page — `mcp-runner-chrome-*.zip` for Chromium browsers, `mcp-runner-firefox-*.zip` for Firefox — unzip it, and load the unpacked folder per the table below.
