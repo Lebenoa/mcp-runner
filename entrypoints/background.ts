@@ -69,7 +69,7 @@ export default defineBackground(() => {
         const reply = await browser.runtime.sendMessage({ target:'host', action }) as Reply;
         if (page && action.type === 'snapshot' && reply.ok) {
           const state = reply.value as Snapshot;
-          reply.value = { systemPrompt: createSystemPrompt(state) };
+          reply.value = { systemPrompt: createSystemPrompt(state), pacing: state.pacing };
         }
         return reply;
       } catch(error) { return { ok:false, error:String(error) }; }

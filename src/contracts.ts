@@ -4,7 +4,7 @@ export interface Tool { name: string; description?: string; inputSchema: Record<
 export interface Rule { fingerprint: string; readOnly: boolean; consequential: boolean; sensitive: boolean }
 export interface Command { id: string; server: string; tool: string; arguments: Record<string, unknown> }
 export interface Prompt { id: string; kind: 'execution' | 'disclosure' | 'elicitation'; message: string; schema?: Record<string, unknown>; command?: Command; chat?: string; server?: string }
-export interface Snapshot { profiles: Profile[]; preset: Preset; connections: Record<string, { status: string; tools: Tool[]; error?: string }>; rules: Record<string, Rule>; prompts: Prompt[]; results: Record<string, unknown>; customPrompt?: string }
+export interface Snapshot { profiles: Profile[]; preset: Preset; connections: Record<string, { status: string; tools: Tool[]; error?: string }>; rules: Record<string, Rule>; prompts: Prompt[]; results: Record<string, unknown>; customPrompt?: string; pacing: { min: number; max: number } }
 export type Action =
  | { type: 'snapshot' }
  | { type: 'server-status'; id: string; chat: string; action?: 'connect' | 'disconnect'; server?: string }
@@ -12,6 +12,7 @@ export type Action =
  | { type: 'remove'; name: string }
  | { type: 'preset'; preset: Preset }
  | { type: 'custom-prompt'; text?: string }
+ | { type: 'pacing'; min: number; max: number }
  | { type: 'rule'; server: string; tool: string; rule: Omit<Rule, 'fingerprint'> }
  | { type: 'connect' | 'disconnect'; name: string }
  | { type: 'invoke'; command: Command; chat?: string }

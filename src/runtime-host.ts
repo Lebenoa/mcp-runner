@@ -5,7 +5,7 @@ import type { Action, Reply } from './contracts.ts';
 export async function installHost() {
   const offscreen = import.meta.env.BROWSER !== 'firefox';
   const host = new SessionHost(async state => {
-    const saved = { profiles: state.profiles, preset: state.preset, rules: state.rules, results: state.results, customPrompt: state.customPrompt };
+    const saved = { profiles: state.profiles, preset: state.preset, rules: state.rules, results: state.results, customPrompt: state.customPrompt, pacing: state.pacing };
     if (offscreen) await browser.runtime.sendMessage({ target:'storage', value:saved });
     else await browser.storage.local.set({ state:saved });
   }, async profile => {

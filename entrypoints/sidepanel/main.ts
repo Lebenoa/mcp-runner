@@ -16,6 +16,8 @@ const promptDrafts: Record<string, Record<string, string>> = {};
 const promptEditor = $('#prompt-editor') as HTMLTextAreaElement;
 let promptEditorDirty = false;
 promptEditor.addEventListener('input', () => { promptEditorDirty = true; });
+const pacingMin = $('#pacing-min') as HTMLInputElement;
+const pacingMax = $('#pacing-max') as HTMLInputElement;
 
 const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
 function selectTab(tab: HTMLButtonElement, focus = false) {
@@ -203,6 +205,10 @@ function render(s: Snapshot) {
   }
   if (JSON.stringify(previous?.prompts) !== JSON.stringify(s.prompts)) renderPrompts(s);
   if (JSON.stringify(previous?.results) !== JSON.stringify(s.results)) renderResults(s);
+  if (JSON.stringify(previous?.pacing) !== JSON.stringify(s.pacing) && document.activeElement !== pacingMin && document.activeElement !== pacingMax) {
+    pacingMin.value = String(s.pacing.min);
+    pacingMax.value = String(s.pacing.max);
+  }
   const connected = Object.values(s.connections).filter(c => c.status === 'connected').length;
   $('#connection-count').textContent = `${connected} connected`;
   const badge = $('#pending-count');
@@ -255,6 +261,9 @@ $('#reset-prompt').addEventListener('click', async () => {
   promptEditor.value = DEFAULT_INSTRUCTIONS;
   const saved = await act({ type: 'custom-prompt' });
   if (saved) promptEditorDirty = false;
+});
+$('#save-pacing').addEventListener('click', () => {
+  void act({ type: 'pacing', min: Number(pacingMin.value) || 0, max: Number(pacingMax.value) || 0 });
 });
 $('#deepseek').addEventListener('click', async () => {
   $('#error').hidden = true;

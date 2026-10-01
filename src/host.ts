@@ -26,6 +26,7 @@ import { prefillElicitationSchema } from "./elicitation-schema.ts";
 
 const PRESETS = ["auto-safe", "ask", "server-perms", "yolo"] as const;
 const RECONNECT_DELAY = 5000;
+const MAX_PACING = 60000;
 
 export class SessionHost {
   state: Snapshot = {
@@ -35,6 +36,7 @@ export class SessionHost {
     rules: {},
     prompts: [],
     results: {},
+    pacing: { min: 0, max: 0 },
   };
   private clients = new Map<string, Client>();
   private transports = new Map<
@@ -71,6 +73,11 @@ export class SessionHost {
       : "auto-safe";
     this.state.results = saved.results ?? {};
     this.state.customPrompt = saved.customPrompt;
+    this.state.pacing = saved.pacing &&
+        typeof saved.pacing.min === "number" &&
+        typeof saved.pacing.max === "number"
+      ? { min: saved.pacing.min, max: saved.pacing.max }
+      : { min: 0, max: 0 };
     for (const profile of this.state.profiles) {
       this.state.connections[profile.name] = {
         status: "disconnected",
@@ -305,6 +312,16 @@ export class SessionHost {
           throw new Error("Custom instructions too long");
         }
         this.state.customPrompt = text || undefined;
+        await this.persist(this.state);
+        return;
+      }
+      case "pacing": {
+        const { min, max } = action;
+        if (
+          !Number.isSafeInteger(min) || !Number.isSafeInteger(max) ||
+          min < 0 || max < min || max > MAX_PACING
+        ) throw new Error("Invalid delay range");
+        this.state.pacing = { min, max };
         await this.persist(this.state);
         return;
       }
@@ -637,6 +654,12 @@ export class SessionHost {
     }
     if (this.clients.get(command.server) !== client) {
       throw new Error("Disconnected while awaiting approval");
+    }
+    const pacing = this.state.pacing;
+    if (pacing.max > 0) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, pacing.min + Math.random() * (pacing.max - pacing.min))
+      );
     }
     let result;
     const requestedTimeout = command.arguments.timeout_ms;

@@ -133,6 +133,10 @@ Auto-safe relies on your classifications, not an inspection of the tool's implem
 
 Elicitation is a server request for confirmation or information. For a recognized gredit workspace-change confirmation, the exact canonical path is shown with **Approve / Deny**; YOLO approves it automatically. Missing required information and URL-based consent still need interaction in every mode.
 
+### Automation delay
+
+In **Settings**, set a minimum and maximum delay in milliseconds. Before each tool execution and before results are sent back to the chat, a wait is drawn uniformly from that range; a maximum of 0 disables it. The value applies in every permission mode.
+
 ### Saved profiles
 
 Disconnect a profile before selecting **Edit**. Change its name, URL, or transport, then save; **Cancel** leaves it unchanged. Changing the endpoint or transport clears its tool reviews.

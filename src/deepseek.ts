@@ -78,7 +78,7 @@ export function startDeepSeekAdapter(request: Request, doc: Document = document,
     (code as HTMLElement).hidden = true;
     return card;
   };
-  const sendResult = (records: Pending[], payloads: unknown[]) => {
+  const sendResult = async (records: Pending[], payloads: unknown[]) => {
     const record = records[0];
     records.forEach((entry, index) => {
       const payload = payloads[index];
@@ -93,36 +93,57 @@ export function startDeepSeekAdapter(request: Request, doc: Document = document,
         : `\`\`\`mcp-result\n${JSON.stringify({ id: entry.command.id, server: entry.command.server, tool: entry.command.tool, ...result as object })}\n\`\`\``;
     });
     let sent = false;
+    let sending = false;
+    // One random wait per batch, drawn from the sidebar-configured range.
+    // Pacing failures fall back to submitting immediately.
+    const wait = await request({ type: 'snapshot' }).then(value => {
+      if (!value || typeof value !== 'object' || !('pacing' in value)) return 0;
+      const pacing = (value as { pacing?: { min?: unknown; max?: unknown } }).pacing;
+      if (!pacing || typeof pacing !== 'object' || typeof pacing.min !== 'number' || typeof pacing.max !== 'number') return 0;
+      const min = Math.max(0, pacing.min), max = Math.max(0, pacing.max);
+      return max > 0 ? min + Math.random() * Math.max(0, max - min) : 0;
+    }).catch(() => 0);
     const submit = () => {
-      if (sent || stopped || win.location.href !== record.chat) return;
+      if (sent || sending || stopped || win.location.href !== record.chat) return;
       const input = doc.querySelector<HTMLTextAreaElement>('textarea[placeholder="Message DeepSeek"]');
       const sendButton = [...doc.querySelectorAll<HTMLElement>('div[role="button"].ds-button--circle.ds-button--primary')].find(candidate => candidate.querySelector('svg path[d^="M8.3125 0.980206"]') !== null);
       if (!input || input.value.trim() || doc.querySelector('.ds-loading') || !sendButton) {
         if (record.card.dataset.mcpPending !== 'true') record.card.dataset.mcpPending = 'true';
         return;
       }
-      const text = messages.join('\n\n');
-      const textarea = doc.defaultView?.HTMLTextAreaElement;
-      if (!textarea || !(input instanceof textarea)) return;
-      Object.getOwnPropertyDescriptor(textarea.prototype, 'value')?.set?.call(input, text);
-      let observer: MutationObserver;
-      const complete = () => {
+      sending = true;
+      win.setTimeout(() => {
+        sending = false;
+        if (sent || stopped || win.location.href !== record.chat) return;
         const currentInput = doc.querySelector<HTMLTextAreaElement>('textarea[placeholder="Message DeepSeek"]');
-        const currentArrow = [...doc.querySelectorAll<HTMLElement>('div[role="button"].ds-button--circle.ds-button--primary')].find(candidate => candidate.querySelector('svg path[d^="M8.3125 0.980206"]') !== null);
-        if (stopped || win.location.href !== record.chat || !record.card.isConnected || !currentInput || currentInput.value !== text) {
-          observer.disconnect(); resultObservers.delete(observer); return;
+        const arrow = [...doc.querySelectorAll<HTMLElement>('div[role="button"].ds-button--circle.ds-button--primary')].find(candidate => candidate.querySelector('svg path[d^="M8.3125 0.980206"]') !== null);
+        if (!currentInput || currentInput.value.trim() || doc.querySelector('.ds-loading') || !arrow) {
+          if (record.card.dataset.mcpPending !== 'true') record.card.dataset.mcpPending = 'true';
+          return;
         }
-        if (!currentArrow || currentArrow.classList.contains('ds-button--disabled') || doc.querySelector('.ds-loading')) return;
-        sent = true; currentArrow.click();
-        records.forEach(entry => { entry.card.dataset.mcpPending = 'false'; cardStatus(entry.card, 'Submitted'); });
-        button.remove();
-        observer.disconnect(); resultObservers.delete(observer);
-      };
-      observer = new MutationObserver(complete);
-      resultObservers.add(observer);
-      observer.observe(doc.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
-      input.dispatchEvent(new (doc.defaultView?.Event || Event)('input', { bubbles: true }));
-      complete();
+        const text = messages.join('\n\n');
+        const textarea = doc.defaultView?.HTMLTextAreaElement;
+        if (!textarea || !(currentInput instanceof textarea)) return;
+        Object.getOwnPropertyDescriptor(textarea.prototype, 'value')?.set?.call(currentInput, text);
+        let observer: MutationObserver;
+        const complete = () => {
+          const currentInput = doc.querySelector<HTMLTextAreaElement>('textarea[placeholder="Message DeepSeek"]');
+          const currentArrow = [...doc.querySelectorAll<HTMLElement>('div[role="button"].ds-button--circle.ds-button--primary')].find(candidate => candidate.querySelector('svg path[d^="M8.3125 0.980206"]') !== null);
+          if (stopped || win.location.href !== record.chat || !record.card.isConnected || !currentInput || currentInput.value !== text) {
+            observer.disconnect(); resultObservers.delete(observer); return;
+          }
+          if (!currentArrow || currentArrow.classList.contains('ds-button--disabled') || doc.querySelector('.ds-loading')) return;
+          sent = true; currentArrow.click();
+          records.forEach(entry => { entry.card.dataset.mcpPending = 'false'; cardStatus(entry.card, 'Submitted'); });
+          button.remove();
+          observer.disconnect(); resultObservers.delete(observer);
+        };
+        observer = new MutationObserver(complete);
+        resultObservers.add(observer);
+        observer.observe(doc.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+        currentInput.dispatchEvent(new (doc.defaultView?.Event || Event)('input', { bubbles: true }));
+        complete();
+      }, wait);
     };
     const button = doc.createElement('button');
     button.type = 'button';

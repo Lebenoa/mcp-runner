@@ -7,6 +7,7 @@ export const actionSchema = z.discriminatedUnion('type',[
  z.object({type:z.literal('remove'),name:z.string()}),
  z.object({type:z.literal('preset'),preset:z.enum(['auto-safe','ask','server-perms','yolo'])}),
  z.object({type:z.literal('custom-prompt'),text:z.string().max(20000).optional()}),
+ z.object({type:z.literal('pacing'),min:z.number().int().min(0).max(60000),max:z.number().int().min(0).max(60000)}),
  z.object({type:z.literal('rule'),server:z.string(),tool:z.string(),rule:z.object({readOnly:z.boolean(),consequential:z.boolean(),sensitive:z.boolean()}).strict()}),
  z.object({type:z.literal('connect'),name:z.string()}),z.object({type:z.literal('disconnect'),name:z.string()}),
  z.object({type:z.literal('invoke'),command,chat:z.string().url().optional()}),
