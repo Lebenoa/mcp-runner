@@ -40,6 +40,11 @@ type Pending = { chat: string; command: Command; card: HTMLElement; statusQuery?
 
 const flatten = (value: string): string => value.replace(/\s+/g, ' ').trim();
 const FENCE = /```(mcp-status-result|mcp-status|mcp-result|mcp)\s*\n([\s\S]*?)\n```/g;
+// Markdown-rendering chat sites (chatgpt.com) consume the fences of submitted
+// user messages: the DOM text becomes "<language>\n<single-line JSON>".
+// These user-block cards are display-only, so accepting the rendered form is
+// safe; anything that does not match this strict shape stays verbatim.
+const RENDERED = /(?:^|\n)(mcp-status-result|mcp-result|mcp-status|mcp)[ \t]*\n(\{[^\n]*\}|\[[^\n]*\])(?=\n|$)/g;
 // Marks payloads produced by our own catch handlers so a legitimate tool
 // result that happens to contain an `error` key is not mistaken for a failure.
 const FAILURE = Symbol('mcp-runner-failure');
@@ -209,18 +214,28 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
     for(const original of dom.userBlocks()) {
       if(!original || original.classList.contains('mcp-card') || original.hidden) continue;
       const raw=original.textContent ?? '';
-      const matches = [...raw.trim().matchAll(FENCE)];
-      if (!matches.length || raw.trim().replace(FENCE, '').trim()) continue;
+      let matches=[...raw.trim().matchAll(FENCE)].map(match=>({lang:match[1],body:match[2],raw:match[0]}));
+      let consumed=raw.trim();
+      if(matches.length){
+        for(const match of matches)consumed=consumed.replace(match.raw,'');
+      }else{
+        const rendered=[...raw.matchAll(RENDERED)];
+        if(rendered.length){
+          matches=rendered.map(match=>({lang:match[1],body:match[2],raw:'```'+match[1]+'\n'+match[2]+'\n```'}));
+          consumed=raw.replace(RENDERED,'');
+        }
+      }
+      if (!matches.length || consumed.trim()) continue;
       for (const match of matches) {
       try {
-        const value:unknown=JSON.parse(match[2]);
+        const value:unknown=JSON.parse(match.body);
         if(!value || typeof value!=='object' || !('id' in value) || typeof value.id!=='string') continue;
-        const statusQuery = match[1].startsWith('mcp-status');
+        const statusQuery = match.lang.startsWith('mcp-status');
         if (!statusQuery && (!('server' in value) || !('tool' in value) || typeof value.server !== 'string' || typeof value.tool !== 'string')) continue;
         const metadata = { id: value.id, server: statusQuery ? 'MCP Runner' : 'server' in value && typeof value.server === 'string' ? value.server : '', tool: statusQuery ? 'Server status' : 'tool' in value && typeof value.tool === 'string' ? value.tool : '' };
-        const response = match[1].endsWith('-result');
+        const response = match.lang.endsWith('-result');
         const sections = response ? { Result: 'result' in value ? value.result : value } : { Arguments: statusQuery ? value : 'arguments' in value ? value.arguments : {} };
-        const card=createBlockCard(doc,metadata,response?'Result shared':'Display only',sections,match[0]);
+        const card=createBlockCard(doc,metadata,response?'Result shared':'Display only',sections,match.raw);
         card.dataset.mcpUserBlock='true';original.insertAdjacentElement('afterend',card);original.hidden=true;
       } catch { /* Preserve malformed blocks verbatim. */ }
       }

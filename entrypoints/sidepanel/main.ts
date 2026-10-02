@@ -96,7 +96,10 @@ async function connect(profile: Profile, disconnect: boolean) {
     else {
       const url = new URL(profile.url);
       if (url.protocol !== 'http:' && url.protocol !== 'https:' && url.protocol !== 'ws:' && url.protocol !== 'wss:') throw new Error('Use an HTTP, HTTPS, WS, or WSS endpoint.');
-      const allowed = await browser.permissions.request({ origins: [originFor(profile.url)] });
+      const origin = originFor(profile.url);
+      // permissions.request can throw "Failed to fetch" from an unfocused
+      // window; granted permissions (e.g. localhost) must not depend on it.
+      const allowed = await browser.permissions.contains({ origins: [origin] }).then(granted => granted || browser.permissions.request({ origins: [origin] }));
       if (!allowed) throw new Error(`Host permission was not granted for ${url.origin}.`);
       await request({ type: 'connect', name: profile.name });
     }
