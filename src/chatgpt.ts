@@ -1,9 +1,12 @@
 import { startChatEngine, type ChatDom, type Request } from './chat-engine.ts';
 
-// chatgpt.com re-renders its composer and controls frequently; every selector
-// has fallbacks and each may need updating when the site ships new markup.
-const COMPOSER = '#prompt-textarea, textarea[data-testid="prompt-textarea"], textarea#prompt-textarea';
-const SEND = 'button[data-testid="send-button"], button#composer-submit-button, button[aria-label="Send prompt"], button[aria-label*="Send"]';
+// Selectors verified against the live chatgpt.com landing page (2026-10):
+// the composer is a plain textarea[name="prompt"] and the send button is
+// button[aria-label="Send message"] — neither carries a data-testid. The
+// #prompt-textarea / data-testid variants are kept as fallbacks for the
+// logged-in UI, whose conversation markup remains unverified.
+const COMPOSER = 'textarea[name="prompt"], textarea[aria-label="Chat with ChatGPT"], #prompt-textarea, textarea[data-testid="prompt-textarea"]';
+const SEND = 'button[aria-label="Send message"], button[data-testid="send-button"], button#composer-submit-button, button[aria-label="Send prompt"]';
 const flattenEditor = (value: string): string => value.replace(/\s+/g, ' ').trim();
 
 const chatGptDom = (doc: Document, win: Window): ChatDom => {
