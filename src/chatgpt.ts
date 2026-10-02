@@ -1,19 +1,27 @@
 import { startChatEngine, type ChatDom, type Request } from './chat-engine.ts';
 
-// Selectors verified against the live chatgpt.com landing page (2026-10):
-// the composer is a plain textarea[name="prompt"] and the send button is
-// button[aria-label="Send message"] — neither carries a data-testid. The
-// #prompt-textarea / data-testid variants are kept as fallbacks for the
-// logged-in UI, whose conversation markup remains unverified.
+// Selectors verified against the live chatgpt.com DOM (2026-10, logged out and
+// logged in). Logged out: the composer is textarea[name="prompt"] and send is
+// button[aria-label="Send message"]. Logged in: the composer is the ProseMirror
+// div#prompt-textarea (plus a HIDDEN textarea[name="prompt-textarea"] that must
+// not win document-order matching — composer() filters to visible elements) and
+// send is button#composer-submit-button[data-testid="send-button"]. The code
+// block language is a sticky header INSIDE the <pre>; the code body lives in
+// the inner <code> element. Conversation turns use [data-message-author-role];
+// existing chats live under /c/<uuid>. No stop-button testid was observed.
 const COMPOSER = 'textarea[name="prompt"], textarea[aria-label="Chat with ChatGPT"], #prompt-textarea, textarea[data-testid="prompt-textarea"]';
 const SEND = 'button[aria-label="Send message"], button[data-testid="send-button"], button#composer-submit-button, button[aria-label="Send prompt"]';
 const flattenEditor = (value: string): string => value.replace(/\s+/g, ' ').trim();
+const visible = (el: HTMLElement): boolean => !!(el.offsetParent || el.getClientRects().length);
 
 const chatGptDom = (doc: Document, win: Window): ChatDom => {
-  const composer = () => doc.querySelector<HTMLElement>(COMPOSER);
+  const composer = () => {
+    const matches = [...doc.querySelectorAll<HTMLElement>(COMPOSER)];
+    return matches.find(visible) ?? null;
+  };
   const sendButton = () => {
     const buttons = [...doc.querySelectorAll<HTMLElement>(SEND)];
-    return buttons.find(button => button.offsetParent !== null) ?? buttons[0] ?? null;
+    return buttons.find(visible) ?? null;
   };
   return {
     composer,
@@ -67,8 +75,12 @@ const chatGptDom = (doc: Document, win: Window): ChatDom => {
       const code = pre.querySelector('code');
       const language = code?.className.match(/language-([\w-]+)/)?.[1]?.toLowerCase()
         ?? code?.getAttribute('data-language')?.toLowerCase()
+        // Verified rendering: the language label is a sticky header inside the
+        // pre, and the pre text is "<language><code body>" — strip the code to
+        // recover the label rather than trusting style classes.
+        ?? (pre.querySelector('[class*="sticky"]')?.textContent ?? '').trim().split(/\s+/)[0]?.toLowerCase()
         ?? '';
-      return { container: pre, code: pre.textContent ?? '', language };
+      return { container: pre, code: code?.textContent ?? pre.textContent ?? '', language };
     }),
   };
 };
