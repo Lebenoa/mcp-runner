@@ -40,7 +40,16 @@ Deno.test({name:'built sidebar and DeepSeek: all transports, background reattach
   await preview.getByText(/Available tools from currently connected servers/).waitFor();
   await panel.locator('#copy-system-prompt').click();await panel.getByText('Copied',{exact:true}).waitFor();
   await panel.locator('#system-prompt-title').scrollIntoViewIfNeeded();await panel.screenshot({path:'.output/system-prompt-proof.png'});
-  await panel.getByRole('button',{name:'Enable DeepSeek access'}).click();await panel.getByText('Access granted',{exact:true}).waitFor();
+  // Chrome dismisses permission prompts from unfocused windows; retry with
+  // the panel in front until the site-access grant lands.
+  let accessGranted=false;
+  for(let attempt=0;attempt<6&&!accessGranted;attempt++){
+   await panel.bringToFront();
+   await panel.getByRole('button',{name:'Enable DeepSeek access'}).click();
+   try{await panel.getByText('Access granted',{exact:true}).waitFor({timeout:5000});accessGranted=true;}
+   catch{await panel.waitForTimeout(1000);}
+  }
+  if(!accessGranted)throw new Error('DeepSeek site access was not granted (click Allow on the permission prompt)');
   await context.route('https://chat.deepseek.com/**',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><html><body><main id="messages"></main><textarea placeholder="Message DeepSeek"></textarea><div role="button" class="ds-button--circle ds-button--primary ds-button--disabled"><svg><path d="M8.3125 0.980206"></path></svg></div><script>window.sent=[];const input=document.querySelector('textarea'),send=document.querySelector('[role=button]');input.addEventListener('input',()=>send.classList.toggle('ds-button--disabled',!input.value));send.addEventListener('click',()=>{window.sent.push(input.value);input.value='';send.classList.add('ds-button--disabled');});</script></body></html>`}));
   const firstChat=await context.newPage();await firstChat.goto('https://chat.deepseek.com/');
   await firstChat.locator('textarea').fill('Inspect my workspace');await firstChat.locator('textarea').press('Enter');

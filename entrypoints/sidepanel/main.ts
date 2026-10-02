@@ -1,6 +1,6 @@
 import { browser } from 'wxt/browser';
 import type { Action, Profile, Rule, Snapshot } from '../../src/contracts';
-import { fingerprint, originFor, ruleKey } from '../../src/contracts';
+import { CHAT_SITES, fingerprint, originFor, ruleKey } from '../../src/contracts';
 import { request, snapshot } from '../../src/bridge';
 import { createSystemPrompt, toolSchemas, DEFAULT_INSTRUCTIONS } from '../../src/system-prompt.ts';
 import './style.css';
@@ -13,7 +13,9 @@ let refreshing = false;
 let editingProfile: string | undefined;
 const argumentDrafts: Record<string, string> = {};
 const reviewDrafts: Record<string, Rule> = {};
-const promptDrafts: Record<string, Record<string, string>> = {};
+// Null prototype: prompt ids are server-controlled, and a Record prototype
+// would let id "__proto__" pollute Object.prototype from the sidebar page.
+const promptDrafts: Record<string, Record<string, string>> = Object.create(null);
 const promptEditor = $('#prompt-editor') as HTMLTextAreaElement;
 let promptEditorDirty = false;
 promptEditor.addEventListener('input', () => { promptEditorDirty = true; });
@@ -63,6 +65,18 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, c
 function button(label: string, handler: () => void, cls = 'quiet') {
   const b = element('button', label, cls); b.type = 'button'; b.addEventListener('click', handler); return b;
 }
+// Reply buttons must not fire twice for one prompt id: a double-click would
+// send two replies. The button re-enables only if the action failed, so the
+// user can retry after an error.
+function replyButton(label: string, build: () => Action, cls = 'quiet') {
+  const b = button(label, () => {
+    b.disabled = true;
+    let action: Action;
+    try { action = build(); } catch (error) { showError(error); b.disabled = false; return; }
+    void act(action).then(ok => { if (!ok) b.disabled = false; });
+  }, cls);
+  return b;
+}
 function renderProfiles(s: Snapshot) {
   profilesEl.replaceChildren();
   if (!s.profiles.length) profilesEl.append(element('p', 'No profiles yet. Add a server to get started.', 'muted'));
@@ -103,7 +117,7 @@ async function connect(profile: Profile, disconnect: boolean) {
       if (!allowed) throw new Error(`Host permission was not granted for ${url.origin}.`);
       await request({ type: 'connect', name: profile.name });
     }
-    await refresh();
+    await refresh(true);
   } catch (error) { showError(error); }
 }
 function renderTools(s: Snapshot) {
@@ -155,10 +169,10 @@ function renderPrompts(s: Snapshot) {
     if (origin || prompt.chat) card.append(element('p', [origin, prompt.chat].filter(Boolean).join(' — '), 'muted'));
     if (prompt.kind === 'elicitation') {
       const schema = prompt.schema ?? {}; const properties = (schema.properties && typeof schema.properties === 'object' ? schema.properties : {}) as Record<string, Record<string, unknown>>;
-      const content: Record<string, unknown> = {}; const fields: Record<string, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement> = {};
+      const content: Record<string, unknown> = Object.create(null); const fields: Record<string, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement> = {};
       if (Object.keys(properties).length === 1 && properties.approved_path?.const !== undefined) {
         const path=element('pre',String(properties.approved_path.const));
-        card.append(path,button('Approve',()=>void act({type:'reply',id:prompt.id,action:'accept',content:{approved_path:properties.approved_path.const}}),'primary'),button('Deny',()=>void act({type:'reply',id:prompt.id,action:'decline'}),'quiet'));
+        card.append(path,replyButton('Approve',()=>({type:'reply',id:prompt.id,action:'accept',content:{approved_path:properties.approved_path.const}}),'primary'),replyButton('Deny',()=>({type:'reply',id:prompt.id,action:'decline'})));
         promptsEl.append(card);continue;
       }
       for (const [key, rawSpec] of Object.entries(properties)) {
@@ -195,31 +209,49 @@ function renderPrompts(s: Snapshot) {
         }
         return content;
       };
-      card.append(button('Accept and send reply', () => { try { void act({ type: 'reply', id: prompt.id, action: 'accept', content: collect() }); } catch (error) { showError(error); } }, 'primary'), button('Decline', () => void act({ type: 'reply', id: prompt.id, action: 'decline' }), 'quiet'));
+      card.append(replyButton('Accept and send reply', () => ({ type: 'reply', id: prompt.id, action: 'accept', content: collect() }), 'primary'), replyButton('Decline', () => ({ type: 'reply', id: prompt.id, action: 'decline' })));
     } else {
       card.append(element('p', prompt.kind === 'disclosure' ? 'Review exactly what will be shared before accepting.' : 'Review the requested tool execution before accepting.', 'hint'));
-      card.append(button('Accept', () => void act({ type: 'reply', id: prompt.id, action: 'accept' }), 'primary'), button('Decline', () => void act({ type: 'reply', id: prompt.id, action: 'decline' }), 'quiet'));
+      card.append(replyButton('Accept', () => ({ type: 'reply', id: prompt.id, action: 'accept' }), 'primary'), replyButton('Decline', () => ({ type: 'reply', id: prompt.id, action: 'decline' })));
     }
-    card.append(button('Cancel', () => void act({ type: 'reply', id: prompt.id, action: 'cancel' }), 'danger-quiet'));
+    card.append(replyButton('Cancel', () => ({ type: 'reply', id: prompt.id, action: 'cancel' }), 'danger-quiet'));
     promptsEl.append(card);
   }
 }
 function renderResults(s: Snapshot) {
   resultsEl.replaceChildren(); const rows = Object.entries(s.results).reverse().slice(0, 50);
   if (!rows.length) { resultsEl.append(element('p', 'No completed tool calls.', 'muted')); return; }
-  for (const [id, result] of rows) { const card = element('article', undefined, 'result-card'); card.append(element('strong', id)); const pre = element('pre'); pre.textContent = typeof result === 'string' ? result : JSON.stringify(result, null, 2); card.append(pre); resultsEl.append(card); }
+  const RESULT_CHARS = 20000;
+  for (const [id, result] of rows) {
+    const card = element('article', undefined, 'result-card'); card.append(element('strong', id));
+    const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+    const pre = element('pre');
+    // A multi-megabyte tool result must not be dumped into the DOM verbatim.
+    pre.textContent = text.length > RESULT_CHARS ? `${text.slice(0, RESULT_CHARS)}\n… truncated (${text.length} characters)` : text;
+    card.append(pre); resultsEl.append(card);
+  }
 }
+let pendingToolsRender = false;
+let pendingPromptsRender = false;
 function render(s: Snapshot) {
   const previous = state;
   state = s;
   const active = document.activeElement;
   if (JSON.stringify([previous?.profiles, previous?.connections]) !== JSON.stringify([s.profiles, s.connections])) renderProfiles(s);
-  if (JSON.stringify([previous?.connections, previous?.rules]) !== JSON.stringify([s.connections, s.rules]) && (!active || !toolsEl.contains(active))) renderTools(s);
+  if (JSON.stringify([previous?.connections, previous?.rules]) !== JSON.stringify([s.connections, s.rules])) {
+    // Focus guards protect in-progress typing, but a skipped render must not
+    // be lost: re-run it once focus leaves the panel.
+    if (!active || !toolsEl.contains(active)) { renderTools(s); pendingToolsRender = false; }
+    else pendingToolsRender = true;
+  }
   if (JSON.stringify([previous?.connections, previous?.customPrompt]) !== JSON.stringify([s.connections, s.customPrompt])) {
     $('#system-prompt').textContent = createSystemPrompt(s);
     if (!promptEditorDirty) promptEditor.value = s.customPrompt ?? DEFAULT_INSTRUCTIONS;
   }
-  if (JSON.stringify(previous?.prompts) !== JSON.stringify(s.prompts) && (!active || !promptsEl.contains(active))) renderPrompts(s);
+  if (JSON.stringify(previous?.prompts) !== JSON.stringify(s.prompts)) {
+    if (!active || !promptsEl.contains(active)) { renderPrompts(s); pendingPromptsRender = false; }
+    else pendingPromptsRender = true;
+  }
   if (JSON.stringify(previous?.results) !== JSON.stringify(s.results)) renderResults(s);
   if (JSON.stringify(previous?.pacing) !== JSON.stringify(s.pacing)) {
     if (document.activeElement !== executionMin && document.activeElement !== executionMax) {
@@ -245,6 +277,16 @@ async function refresh(force = false) {
   catch (error) { if (!state) showError(error); }
   finally { refreshing = false; }
 }
+// A render skipped for focus protection runs as soon as focus leaves the
+// panel (the latest state is used, so nothing is lost in between).
+toolsEl.addEventListener('focusout', event => {
+  if (event.relatedTarget instanceof Node && toolsEl.contains(event.relatedTarget)) return;
+  if (pendingToolsRender && state) { renderTools(state); pendingToolsRender = false; }
+});
+promptsEl.addEventListener('focusout', event => {
+  if (event.relatedTarget instanceof Node && promptsEl.contains(event.relatedTarget)) return;
+  if (pendingPromptsRender && state) { renderPrompts(state); pendingPromptsRender = false; }
+});
 $('#new-profile').addEventListener('click', () => { editingProfile = undefined; form.reset(); form.hidden = false; (form.elements.namedItem('name') as HTMLInputElement).focus(); });
 $('#cancel-profile').addEventListener('click', () => { editingProfile = undefined; form.reset(); form.hidden = true; });
 form.addEventListener('submit', event => {
@@ -266,11 +308,12 @@ async function copyText(text: string, label: string) {
     const area = document.createElement('textarea');
     area.value = text; area.setAttribute('readonly', '');
     area.style.position = 'fixed'; area.style.opacity = '0';
-    document.body.append(area); area.select();
-    const copied = document.execCommand('copy');
-    area.remove();
-    status.textContent = copied ? label : '';
-    if (!copied) showError(new Error('Clipboard unavailable in this panel'));
+    try {
+      document.body.append(area); area.select();
+      const copied = document.execCommand('copy');
+      status.textContent = copied ? label : '';
+      if (!copied) showError(new Error('Clipboard unavailable in this panel'));
+    } finally { area.remove(); }
   }
 }
 $('#copy-system-prompt').addEventListener('click', () => { void copyText($('#system-prompt').textContent ?? '', 'Copied'); });
@@ -292,20 +335,20 @@ $('#save-execution-delay').addEventListener('click', () => {
 $('#save-response-delay').addEventListener('click', () => {
   void act({ type: 'response-delay', min: Number(responseMin.value) || 0, max: Number(responseMax.value) || 0 });
 });
-for (const [buttonId, stateId, origin, label] of [
-  ['deepseek', 'deepseek-state', 'https://chat.deepseek.com/*', 'DeepSeek site access'],
-  ['chatgpt', 'chatgpt-state', 'https://chatgpt.com/*', 'ChatGPT site access'],
-] as const) {
-  $(`#${buttonId}`).addEventListener('click', async () => {
+// Match patterns come from the single source of truth in contracts.ts.
+for (const site of CHAT_SITES) {
+  const stateId = `#${site.id}-state`;
+  const label = `${site.id[0].toUpperCase()}${site.id.slice(1)} site access`;
+  $(`#${site.id}`).addEventListener('click', async () => {
     $('#error').hidden = true;
     try {
-      const granted = await browser.permissions.request({ origins: [origin] });
+      const granted = await browser.permissions.request({ origins: [site.match] });
       if (!granted) throw new Error(`${label} was not granted.`);
-      $(`#${stateId}`).textContent = 'Access granted';
+      $(stateId).textContent = 'Access granted';
     } catch (error) { showError(error); }
   });
-  void browser.permissions.contains({ origins: [origin] }).then(granted => {
-    if (granted) $(`#${stateId}`).textContent = 'Access granted';
+  void browser.permissions.contains({ origins: [site.match] }).then(granted => {
+    if (granted) $(stateId).textContent = 'Access granted';
   });
 }
 void refresh(); window.setInterval(() => void refresh(), 1200);

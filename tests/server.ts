@@ -6,9 +6,13 @@ export function startServer() {
   const tool = { name:'echo', description:'Echo a value', inputSchema:{ type:'object', properties:{ value:{type:'string'} }, required:['value'] }, outputSchema:{ type:'object', properties:{value:{type:'string'}},required:['value'] }, annotations:{ readOnlyHint:true } };
   function response(message: Record<string, unknown>) {
     if (!('id' in message)) return undefined;
-    const params = message.params as Record<string, unknown>;
+    const params = message.params as Record<string, unknown> | undefined;
+    if (message.method && !['initialize', 'tools/list', 'tools/call'].includes(String(message.method))) {
+      return {jsonrpc:'2.0',id:message.id,error:{code:-32601,message:'Method not found'}};
+    }
+    const args = (params?.arguments ?? {}) as Record<string, unknown>;
     const result = message.method === 'initialize' ? { protocolVersion:'2025-06-18', capabilities:{tools:{}}, serverInfo:{name:'fixture',version:'1'} }
-      : message.method === 'tools/list' ? {tools:[tool]} : message.method === 'tools/call' ? (calls++, { content:[{type:'text',text:String((params.arguments as Record<string,unknown>).value)}],structuredContent:{value:String((params.arguments as Record<string,unknown>).value)} }) : {};
+      : message.method === 'tools/list' ? {tools:[tool]} : message.method === 'tools/call' ? (calls++, { content:[{type:'text',text:String(args.value)}],structuredContent:{value:String(args.value)} }) : {};
     return {jsonrpc:'2.0',id:message.id,result};
   }
   const server = Deno.serve({hostname:'127.0.0.1',port:0,onListen(){}}, async request => {
@@ -42,7 +46,12 @@ export function startServer() {
     const message = await request.json();
     const result = response(message);
     if (url.pathname === '/messages') {
-      if(result) streams.get(url.searchParams.get('session')!)?.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify(result)}\n\n`));
+      if(result && url.searchParams.get('session')){
+        // A dead session must not swallow the reply silently.
+        const stream = streams.get(url.searchParams.get('session')!);
+        if (!stream) return new Response(null,{status:404});
+        stream.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify(result)}\n\n`));
+      }
       return new Response(null,{status:202});
     }
     if (!result) return new Response(null,{status:202});

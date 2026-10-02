@@ -38,7 +38,7 @@ export interface ChatDom {
 
 type Pending = { chat: string; command: Command; card: HTMLElement; statusQuery?: boolean };
 
-const flatten = (value: string): string => value.replace(/\s+/g, ' ').trim();
+export const flatten = (value: string): string => value.replace(/\s+/g, ' ').trim();
 const FENCE = /```(mcp-status-result|mcp-status|mcp-result|mcp)\s*\n([\s\S]*?)\n```/g;
 // Markdown-rendering chat sites (chatgpt.com) consume the fences of submitted
 // user messages: the DOM text becomes "<language>\n<single-line JSON>".
@@ -67,6 +67,35 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
   let replayingSubmission = false;
   let firstMessageSent = false;
   let promptRoute = win.location.href;
+  let scanTimer: number | undefined;
+  let composerNotice: HTMLElement | undefined;
+  const notifyComposer = (message: string) => {
+    const input = dom.composer();
+    if (!input) return;
+    composerNotice?.remove();
+    const notice = doc.createElement('p');
+    notice.setAttribute('role', 'alert');
+    notice.textContent = message;
+    composerNotice = notice;
+    input.insertAdjacentElement('beforebegin', notice);
+  };
+  // SPA frameworks navigate with history.pushState, which fires neither
+  // popstate nor hashchange; scan() detects the route change on the next
+  // mutation burst and resets the same state a real navigation event would.
+  // Blocks whose cards survived the navigation keep their seen entry so they
+  // are not carded twice; destroyed cards re-arm their command.
+  const resetRoute = (chat: string) => {
+    promptRoute = chat;
+    firstMessageSent = false;
+    generation++;
+    if (scanTimer !== undefined) { win.clearTimeout(scanTimer); scanTimer = undefined; }
+    for (const timer of approvalTimers) win.clearInterval(timer);
+    approvalTimers.clear();
+    for (const resultObserver of resultObservers) resultObserver.disconnect();
+    resultObservers.clear();
+    const surviving = new Set([...doc.querySelectorAll<HTMLElement>('[data-mcp-runner-id]')].map(card => card.dataset.mcpRunnerId as string));
+    for (const key of [...seen.keys()]) if (!surviving.has(key)) seen.delete(key);
+  };
   const interceptFirstMessage = (event: Event) => {
     if (!event.isTrusted || replayingSubmission) return;
     const input = dom.composer();
@@ -97,9 +126,7 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
       replayingSubmission = true;
       try { button.click(); } finally { replayingSubmission = false; }
     }).catch(() => {
-      const notice = doc.createElement('p'); notice.setAttribute('role', 'alert');
-      notice.textContent = 'MCP Runner could not load tool instructions. Your message was not sent; reconnect servers and try again.';
-      input.insertAdjacentElement('beforebegin', notice);
+      notifyComposer('MCP Runner could not load tool instructions. Your message was not sent; reconnect servers and try again.');
     }).finally(() => { preparingPrompt = false; });
   };
   doc.addEventListener('click', interceptFirstMessage, true);
@@ -168,6 +195,9 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
           // so the pending retry can re-submit once the composer clears.
           if (sent) { observer.disconnect(); resultObservers.delete(observer); return; }
           if (stopped || win.location.href !== record.chat || !record.card.isConnected) {
+            if (!stopped && win.location.href === record.chat && !record.card.isConnected) {
+              notifyComposer('MCP Runner lost the result card before it could be sent; the result remains in the sidebar.');
+            }
             observer.disconnect(); resultObservers.delete(observer); return;
           }
           const currentInput = dom.composer();
@@ -198,7 +228,11 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
     button.addEventListener('click', submit);
     record.card.querySelector('.mcp-card-body')!.append(button);
     const retryObserver = new MutationObserver(() => {
-      if (!record.card.isConnected || stopped || win.location.href !== record.chat) {
+      if (stopped || win.location.href !== record.chat) {
+        retryObserver.disconnect(); resultObservers.delete(retryObserver); return;
+      }
+      if (!record.card.isConnected) {
+        notifyComposer('MCP Runner lost the result card before it could be sent; the result remains in the sidebar.');
         retryObserver.disconnect(); resultObservers.delete(retryObserver); return;
       }
       if (record.card.dataset.mcpPending === 'true') submit();
@@ -210,7 +244,7 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
   const scan = () => {
     if (stopped) return;
     const chat = win.location.href;
-    if (promptRoute !== chat) { promptRoute = chat; firstMessageSent = false; }
+    if (promptRoute !== chat) resetRoute(chat);
     for(const original of dom.userBlocks()) {
       if(!original || original.classList.contains('mcp-card') || original.hidden) continue;
       const raw=original.textContent ?? '';
@@ -276,7 +310,7 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
       const messageElement = dom.messageOf(container);
       if (!messageElement) continue;
       seen.set(key, signature);
-      if (seen.size > 500) seen.delete(seen.keys().next().value as string);
+      if (seen.size > 2000) seen.delete(seen.keys().next().value as string);
       const card = cardFor(container, command, key, statusQuery);
       const record: Pending = { chat, command, card, statusQuery };
       let batch = batches.get(messageElement);
@@ -359,7 +393,6 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
       });
     }
   };
-  let scanTimer: number | undefined;
   const scheduleScan = (mutations: MutationRecord[]) => {
     if (mutations.every(mutation => {
       const element = mutation.target.nodeType === 1 ? mutation.target as Element : mutation.target.parentElement;
@@ -371,13 +404,7 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
   const observer = new MutationObserver(scheduleScan);
   observer.observe(doc.documentElement, { childList: true, subtree: true, characterData: true, attributes: true });
   const onNavigation = () => {
-    if (promptRoute !== win.location.href) { promptRoute = win.location.href; firstMessageSent = false; }
-    generation++;
-    if (scanTimer !== undefined) win.clearTimeout(scanTimer);
-    for (const timer of approvalTimers) win.clearInterval(timer);
-    approvalTimers.clear();
-    for (const resultObserver of resultObservers) resultObserver.disconnect();
-    resultObservers.clear();
+    resetRoute(win.location.href);
     scan();
   };
   win.addEventListener('popstate', onNavigation);

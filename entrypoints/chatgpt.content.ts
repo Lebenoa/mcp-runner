@@ -7,7 +7,7 @@ export default defineContentScript({
   main() {
     const style=document.createElement('style');
     style.textContent=cardStyles;
-    document.head.append(style);
+    if (document.head) document.head.append(style);
     startChatGPTAdapter(request);
   },
 });

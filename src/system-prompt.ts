@@ -15,10 +15,14 @@ export const DEFAULT_INSTRUCTIONS = [
   'Auto-safe uses saved tool reviews; Ask prompts for execution. Server Perms executes server-exposed tools and shares results without client approval but keeps server elicitation interactive. YOLO also auto-accepts form elicitation when required values are provided by constants/defaults; missing user information and URL-based consent remain interactive. No mode unlocks tools disabled by a server.',
 ].join('\n');
 
+// Tool metadata is untrusted server data: break any triple-backtick run so a
+// description or name cannot forge tool-call blocks inside the instructions.
+const sanitize = (text: string): string => text.replace(/`{3}/g, '``\u200b`');
+
 function connectedTools(state: Pick<Snapshot, 'connections'>) {
   return Object.entries(state.connections).flatMap(([server, connection]) =>
     connection.status === 'connected'
-      ? connection.tools.map(tool => ({ server, tool: tool.name, description: tool.description ?? '', inputSchema: tool.inputSchema }))
+      ? connection.tools.map(tool => ({ server, tool: sanitize(tool.name), description: sanitize(tool.description ?? ''), inputSchema: tool.inputSchema }))
       : []);
 }
 

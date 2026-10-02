@@ -1,7 +1,8 @@
 import { browser } from 'wxt/browser';
 import { SessionHost } from './host.ts';
 import { originFor } from './contracts.ts';
-import type { Action, Reply } from './contracts.ts';
+import type { Reply } from './contracts.ts';
+import { actionSchema } from './validation.ts';
 export async function installHost() {
   const offscreen = import.meta.env.BROWSER !== 'firefox';
   const host = new SessionHost(async state => {
@@ -18,7 +19,10 @@ export async function installHost() {
   const restored = host.restore(stored);
   browser.runtime.onMessage.addListener((message, sender) => {
     if (message?.target !== 'host' || sender.id !== browser.runtime.id || sender.tab) return;
-    return restored.then(() => host.handle(message.action as Action)).then(value => ({ ok: true, value } satisfies Reply), error => ({ ok: false, error: String(error) } satisfies Reply));
+    // Same validation the service-worker router applies: no blind casts.
+    const parsed = actionSchema.safeParse(message.action);
+    if (!parsed.success) return Promise.resolve({ ok: false, error: 'Invalid action' } satisfies Reply);
+    return restored.then(() => host.handle(parsed.data)).then(value => ({ ok: true, value } satisfies Reply), error => ({ ok: false, error: String(error) } satisfies Reply));
   });
   return host;
 }

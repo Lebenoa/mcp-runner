@@ -43,13 +43,13 @@ Deno.test("SSE errors terminate streams; unfinished POSTs still resume", async (
           },
         }, "init");
       }
-      if (m.params.arguments.interrupted) {
+      if (m.params?.arguments?.interrupted) {
         return new Response("id: unfinished\nretry: 10\ndata: \n\n", {
           headers: { "content-type": "text/event-stream" },
         });
       }
       return sse(
-        m.params.arguments.fail
+        m.params?.arguments?.fail
           ? {
             jsonrpc: "2.0",
             id: m.id,
@@ -92,7 +92,7 @@ Deno.test("SSE errors terminate streams; unfinished POSTs still resume", async (
         !String(r.reason).includes("expected tool failure")
       )
     ) throw Error("errors changed");
-    await new Promise((r) => setTimeout(r, 60));
+    await new Promise((r) => setTimeout(r, 1000));
     if (resumes.length) throw Error("completed error stream resumed");
     const next = await client.callTool({ name: "echo", arguments: {} });
     if (

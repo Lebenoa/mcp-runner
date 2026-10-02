@@ -86,7 +86,7 @@ window.renderAssistant=function(text){
     if(!(Array.isArray(listed)&&listed.length===1&&listed[0].server===serverName))throw new Error('Missing connected tool listing');
     // The assistant reply contains a real command in the verified block
     // structure; the built extension must detect, invoke and submit the result.
-    await chat.waitForFunction(()=> (window as unknown as {sent:string[]}).sent.length===2,{timeoutMs:15000});
+    await chat.waitForFunction(()=> (window as unknown as {sent:string[]}).sent.length===2,{timeout:15000});
     const resultSent=await chat.evaluate(()=>(window as unknown as {sent:string[]}).sent[1]);
     const result=JSON.parse(resultSent.match(/```mcp-result\n([\s\S]*?)\n```/)![1]);
     if(!result.id.startsWith('gpt-echo')||result.server!==serverName||result.tool!=='echo')throw new Error('Result not correlated');

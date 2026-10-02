@@ -24,7 +24,7 @@ import {
   type Snapshot,
   type Tool,
 } from "./contracts.ts";
-import type { Profile } from "./contracts.ts";
+import type { Profile, Rule } from "./contracts.ts";
 import { prefillElicitationSchema } from "./elicitation-schema.ts";
 import { createSystemPrompt } from "./system-prompt.ts";
 
@@ -41,6 +41,7 @@ function pacingRange(value: unknown): { min: number; max: number } {
   return { min, max: Math.min(Math.max(range.max, min), MAX_PACING) };
 }
 const RESULT_LIMIT = 100;
+const PROMPT_LIMIT = 50;
 
 export class SessionHost {
   state: Snapshot = {
@@ -72,6 +73,10 @@ export class SessionHost {
   >();
   private running = new Map<string, Promise<unknown>>();
   private commands = new Map<string, string>();
+  // Tombstones for results evicted by pruneResults: replay protection must
+  // outlive the payload, or re-invoking an old id silently re-executes.
+  private completed = new Set<string>();
+  private connecting = new Map<string, Promise<void>>();
   private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
   constructor(
     private persist: (state: Snapshot) => Promise<void>,
@@ -85,12 +90,25 @@ export class SessionHost {
       typeof profile.url === "string" && !!profile.url.trim() &&
       ["http", "sse", "ws"].includes(profile.transport)
     );
-    this.state.rules = saved.rules ?? {};
+    // Storage content is untrusted: a corrupted rule could skip approval
+    // gates, so validate shape at the entry point, not at use.
+    this.state.rules = Object.fromEntries(
+      Object.entries(saved.rules ?? {}).filter(([, rule]) =>
+        !!rule && typeof rule === "object" &&
+        typeof (rule as Rule).fingerprint === "string" &&
+        typeof (rule as Rule).readOnly === "boolean" &&
+        typeof (rule as Rule).consequential === "boolean" &&
+        typeof (rule as Rule).sensitive === "boolean"
+      ),
+    ) as Snapshot["rules"];
     this.state.preset = saved.preset && PRESETS.includes(saved.preset)
       ? saved.preset
       : "auto-safe";
     this.state.results = saved.results ?? {};
-    this.state.customPrompt = saved.customPrompt;
+    this.state.customPrompt = typeof saved.customPrompt === "string" &&
+        saved.customPrompt.trim() && saved.customPrompt.length <= 20000
+      ? saved.customPrompt
+      : undefined;
     this.state.pacing = {
       execution: pacingRange(saved.pacing?.execution),
       response: pacingRange(saved.pacing?.response),
@@ -129,6 +147,9 @@ export class SessionHost {
       content?: Record<string, unknown>;
     }>;
   } {
+    if (this.state.prompts.length >= PROMPT_LIMIT) {
+      throw new Error("Too many pending prompts; resolve or cancel some first");
+    }
     const id = crypto.randomUUID();
     this.state.prompts.push({ ...prompt, id });
     const { promise, resolve } = Promise.withResolvers<
@@ -251,7 +272,9 @@ export class SessionHost {
             JSON.stringify(p.command) === JSON.stringify(action.command)
           ) ?? this.state.prompts.find((p) =>
             p.kind === "elicitation" && p.server === action.command.server &&
-            this.running.has(JSON.stringify([action.chat, action.command.id]))
+            this.running.has(
+              JSON.stringify([chatKey(action.chat), action.command.id]),
+            )
           );
           return waiting
             ? {
@@ -320,7 +343,7 @@ export class SessionHost {
         this.state.profiles = original
           ? this.state.profiles.map((profile) =>
             profile.name === originalName
-              ? { ...p, name, reconnect: false }
+              ? { ...p, name, reconnect: original.reconnect ?? false }
               : profile
           )
           : [...this.state.profiles, { ...p, name, reconnect: false }];
@@ -409,7 +432,21 @@ export class SessionHost {
         throw new Error("Unknown action");
     }
   }
+  // Concurrent connect attempts share one in-flight promise; the client entry
+  // is inserted before the transport connects, so a bare clients.has() check
+  // would report success for an attempt that is about to fail.
   private async connect(name: string, retry = true) {
+    const inFlight = this.connecting.get(name);
+    if (inFlight) return await inFlight;
+    const attempt = this.connectAttempt(name, retry);
+    this.connecting.set(name, attempt);
+    try {
+      return await attempt;
+    } finally {
+      if (this.connecting.get(name) === attempt) this.connecting.delete(name);
+    }
+  }
+  private async connectAttempt(name: string, retry: boolean) {
     const profile = this.state.profiles.find((p) => p.name === name);
     if (!profile) throw new Error("Unknown profile");
     if (this.clients.has(name)) return;
@@ -573,7 +610,9 @@ export class SessionHost {
       }
       this.clients.delete(name);
       this.transports.delete(name);
-      await this.connect(name, false);
+      // Bypass the connecting map: the failing attempt this recovery belongs
+      // to still occupies it, so connect() here would await itself forever.
+      await this.connectAttempt(name, false);
     })();
     this.recovering.set(name, operation);
     try {
@@ -633,7 +672,7 @@ export class SessionHost {
       throw new Error("Command ID reused with different contents");
     }
     if (this.running.has(key)) return await this.running.get(key);
-    if (Object.hasOwn(this.state.results, key)) {
+    if (Object.hasOwn(this.state.results, key) || this.completed.has(key)) {
       throw new Error("Command already completed; use a new ID");
     }
     this.commands.set(key, signature);
@@ -643,12 +682,13 @@ export class SessionHost {
       const result = await task;
       this.state.results[key] = result;
       this.pruneResults();
-      await this.persist(this.state);
+      // A failed persist must not overwrite the genuine result with an error.
+      await this.persist(this.state).catch(() => {});
       return result;
     } catch (error) {
       this.state.results[key] = { error: String(error) };
       this.pruneResults();
-      await this.persist(this.state);
+      await this.persist(this.state).catch(() => {});
       throw error;
     } finally {
       this.running.delete(key);
@@ -657,6 +697,7 @@ export class SessionHost {
         return signature &&
           (JSON.parse(signature) as Command).server === command.server;
       });
+      this.commands.delete(key);
       if (!otherRunning) {
         for (
           const prompt of this.state.prompts.filter((prompt) =>
@@ -670,6 +711,11 @@ export class SessionHost {
     const keys = Object.keys(this.state.results);
     for (const key of keys.slice(0, keys.length - RESULT_LIMIT)) {
       delete this.state.results[key];
+      this.completed.add(key);
+    }
+    for (const key of this.completed) {
+      if (this.completed.size <= RESULT_LIMIT * 10) break;
+      this.completed.delete(key);
     }
   }
   private async execute(command: Command, chat?: string): Promise<unknown> {

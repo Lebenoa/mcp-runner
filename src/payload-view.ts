@@ -5,11 +5,16 @@ function node(doc: Document, tag: string, text?: string, className?: string): HT
   return element;
 }
 
+// Pathological server payloads must not overflow the stack; deeper levels
+// collapse to a marker. The lazy toggle defers rendering, not the bound.
+const MAX_DEPTH = 20;
+
 function jsonValue(doc: Document, value: unknown, depth = 0): HTMLElement {
   if (value !== null && typeof value === 'object') {
+    if (depth > MAX_DEPTH) return node(doc, 'span', '… too deep to render', 'mcp-value');
     const array = Array.isArray(value);
     const entries = Object.entries(value);
-    if (!entries.length) return node(doc, 'span', array ? '[] · empty array' : '{} · empty object', 'mcp-value mcp-null');
+    if (!entries.length) return node(doc, 'span', array ? '[] · empty array' : '{} · empty object', 'mcp-value mcp-empty');
     const details = doc.createElement('details'); details.className = 'mcp-json-group'; details.open = depth < 2;
     details.append(node(doc, 'summary', `${array ? 'Array' : 'Object'} · ${entries.length} ${array ? 'items' : 'fields'}`));
     const rows = node(doc, 'dl', undefined, 'mcp-json-rows');

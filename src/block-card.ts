@@ -13,6 +13,6 @@ export function createBlockCard(doc: Document, metadata: {id:string;server:strin
   const body=doc.createElement('div');body.className='mcp-card-body';
   for(const [label,value] of Object.entries(sections)) body.append(createPayloadSection(doc,label,value));
   const copy=doc.createElement('button');copy.type='button';copy.textContent='Copy original block';
-  copy.addEventListener('click',()=>{void doc.defaultView?.navigator.clipboard.writeText(raw).then(()=>{copy.textContent='Copied';},()=>{copy.textContent='Copy unavailable';});});
+  copy.addEventListener('click',()=>{void doc.defaultView?.navigator.clipboard.writeText(raw).then(()=>{copy.textContent='Copied';doc.defaultView?.setTimeout(()=>{copy.textContent='Copy original block';},1500);},()=>{copy.textContent='Copy unavailable';});});
   body.append(copy);card.append(body);return card;
 }

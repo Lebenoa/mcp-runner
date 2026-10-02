@@ -6,6 +6,7 @@ Deno.test('Ask requires separate approval for consequential execution and sensit
   await host.handle({type:'save',profile:{name:'fixture',url:fixture.url+'/mcp',transport:'http'}});await host.handle({type:'connect',name:'fixture'});
   await host.handle({type:'preset',preset:'ask'});await host.handle({type:'rule',server:'fixture',tool:'echo',rule:{readOnly:false,consequential:true,sensitive:true}});
   const operation=host.handle({type:'invoke',command:{id:'risk',server:'fixture',tool:'echo',arguments:{value:'private-result'}},chat:'https://chat.deepseek.com/a/chat/s/fixture'});
+  for(let i=0;i<200 && host.state.prompts[0]?.kind!=='execution';i++){const {promise,resolve}=Promise.withResolvers<void>();setTimeout(resolve,5);await promise;}
   const execution=host.state.prompts[0];if(execution?.kind!=='execution'||fixture.calls!==0)throw new Error('Consequential action bypassed approval');
   await host.handle({type:'reply',id:execution.id,action:'accept'});
   for(let i=0;i<100 && host.state.prompts[0]?.kind!=='disclosure';i++){const {promise,resolve}=Promise.withResolvers<void>();setTimeout(resolve,5);await promise;}
@@ -35,7 +36,9 @@ Deno.test('card approval binds exact command and chat and cannot be replayed',as
  try{
   await host.handle({type:'save',profile:{name:'fixture',url:fixture.url+'/mcp',transport:'http'}});await host.handle({type:'connect',name:'fixture'});
   await host.handle({type:'rule',server:'fixture',tool:'echo',rule:{readOnly:true,consequential:false,sensitive:false}});await host.handle({type:'preset',preset:'ask'});
-  const operation=host.handle({type:'invoke',command,chat});const promptId=host.state.prompts[0].id;
+  const operation=host.handle({type:'invoke',command,chat});
+  for(let i=0;i<200 && !host.state.prompts[0];i++){const {promise,resolve}=Promise.withResolvers<void>();setTimeout(resolve,5);await promise;}
+  const promptId=host.state.prompts[0].id;
   for(const action of [
    {type:'approve-command' as const,command:{...command,arguments:{value:'different'}},chat,promptId},
    {type:'approve-command' as const,command,chat:chat+'/other',promptId},

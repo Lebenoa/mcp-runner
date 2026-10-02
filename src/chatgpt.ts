@@ -1,4 +1,4 @@
-import { startChatEngine, type ChatDom, type Request } from './chat-engine.ts';
+import { startChatEngine, flatten, type ChatDom, type Request } from './chat-engine.ts';
 
 // Selectors verified against the live chatgpt.com DOM (2026-10, logged out and
 // logged in). Logged out: the composer is textarea[name="prompt"] and send is
@@ -11,7 +11,6 @@ import { startChatEngine, type ChatDom, type Request } from './chat-engine.ts';
 // existing chats live under /c/<uuid>. No stop-button testid was observed.
 const COMPOSER = 'textarea[name="prompt"], textarea[aria-label="Chat with ChatGPT"], #prompt-textarea, textarea[data-testid="prompt-textarea"]';
 const SEND = 'button[aria-label="Send message"], button[data-testid="send-button"], button#composer-submit-button, button[aria-label="Send prompt"]';
-const flattenEditor = (value: string): string => value.replace(/\s+/g, ' ').trim();
 const visible = (el: HTMLElement): boolean => !!(el.offsetParent || el.getClientRects().length);
 
 const chatGptDom = (doc: Document, win: Window): ChatDom => {
@@ -49,7 +48,7 @@ const chatGptDom = (doc: Document, win: Window): ChatDom => {
         selection.addRange(range);
         inserted = view.document.execCommand('insertText', false, text);
       }
-      if (!inserted || flattenEditor(composerElement.textContent ?? '') !== flattenEditor(text)) {
+      if (!inserted || flatten(composerElement.textContent ?? '') !== flatten(text)) {
         composerElement.textContent = text;
         composerElement.dispatchEvent(new view.Event('input', { bubbles: true }));
       }
@@ -78,8 +77,7 @@ const chatGptDom = (doc: Document, win: Window): ChatDom => {
         // Verified rendering: the language label is a sticky header inside the
         // pre, and the pre text is "<language><code body>" — strip the code to
         // recover the label rather than trusting style classes.
-        ?? (pre.querySelector('[class*="sticky"]')?.textContent ?? '').trim().split(/\s+/)[0]?.toLowerCase()
-        ?? '';
+        ?? (pre.querySelector('[class*="sticky"]')?.textContent ?? '').trim().split(/\s+/)[0].toLowerCase();
       return { container: pre, code: code?.textContent ?? pre.textContent ?? '', language };
     }),
   };

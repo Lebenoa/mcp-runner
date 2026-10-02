@@ -1,20 +1,23 @@
 import { z } from 'zod';
 const command = z.object({id:z.string().min(1),server:z.string().min(1),tool:z.string().min(1),arguments:z.record(z.unknown())}).strict();
+// Page chat URLs are always HTTP(S); profile endpoints may also be WS(S).
+const chatUrl = z.string().url().refine(value => /^https?:\/\//.test(value), 'Chat URL must be HTTP(S)');
+const endpointUrl = z.string().url().refine(value => /^(https?|wss?):\/\//.test(value), 'Endpoint must be HTTP(S) or WS(S)');
 export const actionSchema = z.discriminatedUnion('type',[
  z.object({type:z.literal('snapshot')}),
  z.object({type:z.literal('page-snapshot')}),
- z.object({type:z.literal('server-status'),id:z.string().trim().min(1),chat:z.string().url(),action:z.enum(['connect','disconnect']).optional(),server:z.string().min(1).optional()}),
- z.object({type:z.literal('save'),originalName:z.string().optional(),profile:z.object({name:z.string().trim().min(1),url:z.string().url(),transport:z.enum(['http','sse','ws'])})}),
- z.object({type:z.literal('remove'),name:z.string()}),
+ z.object({type:z.literal('server-status'),id:z.string().trim().min(1),chat:chatUrl,action:z.enum(['connect','disconnect']).optional(),server:z.string().min(1).optional()}),
+ z.object({type:z.literal('save'),originalName:z.string().min(1).optional(),profile:z.object({name:z.string().trim().min(1),url:endpointUrl,transport:z.enum(['http','sse','ws'])})}),
+ z.object({type:z.literal('remove'),name:z.string().min(1)}),
  z.object({type:z.literal('preset'),preset:z.enum(['auto-safe','ask','server-perms','yolo'])}),
  z.object({type:z.literal('custom-prompt'),text:z.string().max(20000).optional()}),
  z.object({type:z.literal('execution-delay'),min:z.number().int().min(0).max(60000),max:z.number().int().min(0).max(60000)}),
  z.object({type:z.literal('response-delay'),min:z.number().int().min(0).max(60000),max:z.number().int().min(0).max(60000)}),
- z.object({type:z.literal('rule'),server:z.string(),tool:z.string(),rule:z.object({readOnly:z.boolean(),consequential:z.boolean(),sensitive:z.boolean()}).strict()}),
- z.object({type:z.literal('connect'),name:z.string()}),z.object({type:z.literal('disconnect'),name:z.string()}),
- z.object({type:z.literal('invoke'),command,chat:z.string().url().optional()}),
- z.object({type:z.literal('approval-status'),command,chat:z.string().url()}),
- z.object({type:z.literal('approve-command'),command,chat:z.string().url(),promptId:z.string()}),
- z.object({type:z.literal('reply-elicitation'),command,chat:z.string().url(),promptId:z.string(),action:z.enum(['accept','decline','cancel']),content:z.record(z.unknown()).optional()}),
- z.object({type:z.literal('reply'),id:z.string(),action:z.enum(['accept','decline','cancel']),content:z.record(z.unknown()).optional()}),
+ z.object({type:z.literal('rule'),server:z.string().min(1),tool:z.string().min(1),rule:z.object({readOnly:z.boolean(),consequential:z.boolean(),sensitive:z.boolean()}).strict()}),
+ z.object({type:z.literal('connect'),name:z.string().min(1)}),z.object({type:z.literal('disconnect'),name:z.string().min(1)}),
+ z.object({type:z.literal('invoke'),command,chat:chatUrl.optional()}),
+ z.object({type:z.literal('approval-status'),command,chat:chatUrl}),
+ z.object({type:z.literal('approve-command'),command,chat:chatUrl,promptId:z.string().min(1)}),
+ z.object({type:z.literal('reply-elicitation'),command,chat:chatUrl,promptId:z.string().min(1),action:z.enum(['accept','decline','cancel']),content:z.record(z.unknown()).optional()}),
+ z.object({type:z.literal('reply'),id:z.string().min(1),action:z.enum(['accept','decline','cancel']),content:z.record(z.unknown()).optional()}),
 ]);

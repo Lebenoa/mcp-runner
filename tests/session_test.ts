@@ -151,6 +151,9 @@ Deno.test("expired HTTP session: concurrent calls share recovery and are never r
       results.every((result) => result.status === "rejected") &&
         String((results[0] as PromiseRejectedResult).reason).includes(
           "outcome is unknown",
+        ) &&
+        String((results[1] as PromiseRejectedResult).reason).includes(
+          "outcome is unknown",
         ),
       "expired call was replayed instead of failing visibly",
     );

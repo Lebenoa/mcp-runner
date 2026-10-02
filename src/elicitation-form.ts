@@ -13,7 +13,7 @@ export function createElicitationForm(doc: Document, schema: Record<string, unkn
     const input = spec.type === 'boolean' || Array.isArray(spec.enum) ? doc.createElement('select') : doc.createElement('input');
     input.setAttribute('aria-label', key);
     input.required = Array.isArray(schema?.required) && schema.required.includes(key);
-    if (input instanceof doc.defaultView!.HTMLSelectElement) {
+    if (doc.defaultView && input instanceof doc.defaultView.HTMLSelectElement) {
       for (const value of ['', ...(Array.isArray(spec.enum) ? spec.enum.map(String) : ['true','false'])]) { const option=doc.createElement('option');option.value=value;option.textContent=value || 'Choose…';input.append(option); }
     }
     const initial = spec.const !== undefined ? spec.const : spec.default;
@@ -23,7 +23,8 @@ export function createElicitationForm(doc: Document, schema: Record<string, unkn
   }
   const error=doc.createElement('p');error.setAttribute('role','alert');form.append(error);
   const send=async(action:'accept'|'decline'|'cancel')=>{
-    const content:Record<string,unknown>={};
+    // Null prototype: property keys are server-controlled schema names.
+    const content:Record<string,unknown>=Object.create(null);
     try {
       if(action==='accept')for(const [key,input] of fields){
         if(!input.value)continue;
