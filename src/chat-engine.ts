@@ -139,8 +139,10 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
     const submit = () => {
       if (sent || sending || stopped || win.location.href !== record.chat) return;
       const input = dom.composer();
-      const sendButton = dom.sendButton();
-      if (!input || flatten(dom.composerValue(input)) || dom.isGenerating() || !sendButton) {
+      // The send control may not exist until the composer has content
+      // (verified on chatgpt.com), so insert the text first and let the
+      // completion observer wait for the button instead of requiring it here.
+      if (!input || flatten(dom.composerValue(input)) || dom.isGenerating()) {
         if (record.card.dataset.mcpPending !== 'true') record.card.dataset.mcpPending = 'true';
         return;
       }
@@ -149,8 +151,7 @@ export function startChatEngine(request: Request, doc: Document, win: Window, do
         sending = false;
         if (sent || stopped || win.location.href !== record.chat) return;
         const currentInput = dom.composer();
-        const arrow = dom.sendButton();
-        if (!currentInput || flatten(dom.composerValue(currentInput)) || dom.isGenerating() || !arrow) {
+        if (!currentInput || flatten(dom.composerValue(currentInput)) || dom.isGenerating()) {
           if (record.card.dataset.mcpPending !== 'true') record.card.dataset.mcpPending = 'true';
           return;
         }
