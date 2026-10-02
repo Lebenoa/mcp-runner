@@ -1,6 +1,10 @@
 import { defineConfig } from 'wxt';
 import { CHAT_SITES } from './src/contracts.ts';
 export default defineConfig({
+  // Extension pages cannot reuse module preloads across worlds (Chrome warns
+  // and drops them), so the generated <link rel="modulepreload"> tags only
+  // produce console noise.
+  vite: () => ({ build: { modulePreload: false } }),
   hooks: {
     'build:manifestGenerated': (_wxt, manifest) => {
       const chatMatches = CHAT_SITES.map(site => site.match);
